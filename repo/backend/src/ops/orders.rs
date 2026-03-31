@@ -10,6 +10,7 @@
 //!   GET    /orders/by-number/{num}        find_by_number       (ViewOrders)
 //!   GET    /orders/{id}                   get_order            (ViewOrders)
 //!   POST   /orders                        create_order         (ManageOrders)
+//!   POST   /orders/{id}/hold              hold_order           (ManageOrders)
 //!   POST   /orders/{id}/confirm           confirm_order        (ManageOrders)
 //!   POST   /orders/{id}/cancel            cancel_order         (ManageOrders)
 //!   POST   /orders/{id}/refund            process_refund       (ProcessRefunds)
@@ -27,6 +28,7 @@ use uuid::Uuid;
 use crate::auth::rbac::{
     RequireManageOrders, RequireOverrideFees, RequireProcessRefunds, RequireViewOrders,
 };
+use crate::rules::RulesEngine;
 use crate::config::AppConfig;
 use crate::crypto;
 use crate::db::audit::write_audit;
@@ -291,6 +293,46 @@ pub async fn create_order(
     Ok(HttpResponse::Created().json(json!({ "id": id, "order_number": order_number })))
 }
 
+/// Place an order in the held state.
+///
+/// The hold-expiry timestamp is computed from the live `order_hold_ttl_minutes`
+/// rule (default 15 min) so that ops can tune the window without redeploying.
+pub async fn hold_order(
+    pool:  web::Data<PgPool>,
+    path:  web::Path<Uuid>,
+    auth:  RequireManageOrders,
+) -> AppResult<HttpResponse> {
+    let id    = path.into_inner();
+    let order = OrderRepo::new(&pool)
+        .find_by_id(id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Order".into()))?;
+
+    if order.status != "pending" {
+        return Err(AppError::Validation(format!(
+            "Only pending orders can be held (current status: '{}')", order.status
+        )));
+    }
+
+    let expires_at = RulesEngine::new(&pool).hold_expiry().await;
+
+    OrderRepo::new(&pool).hold(id, expires_at).await?;
+    OrderEventRepo::new(&pool).insert(&NewOrderEvent {
+        order_id:     id,
+        event_type:   "held".into(),
+        performed_by: Some(auth.id),
+        reason:       None,
+        data:         Some(json!({ "hold_expires_at": expires_at })),
+    }).await?;
+
+    write_audit(
+        &pool, "order_held", "orders", Some(id), Some(auth.id),
+        "hold_order", None, Some(json!({ "hold_expires_at": expires_at })), None,
+    ).await;
+
+    Ok(HttpResponse::Ok().json(json!({ "ok": true, "hold_expires_at": expires_at })))
+}
+
 pub async fn confirm_order(
     pool:  web::Data<PgPool>,
     path:  web::Path<Uuid>,
@@ -357,43 +399,86 @@ pub async fn cancel_order(
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
 
+/// Process a refund for a cancelled order.
+///
+/// The allowed refund amount is computed by `RulesEngine::evaluate_refund`,
+/// which applies live-configurable tiered logic:
+///
+///   - > `refund_full_hours` before departure  → FullMinusFee
+///   - 2–24 h before departure                → HalfFare
+///   - < `refund_partial_hours` + disruption  → ServiceDisruption (full fare)
+///   - < `refund_partial_hours`, no disruption → blocked (HTTP 422)
+///
+/// The caller may submit any amount ≤ the computed maximum; the maximum
+/// is always returned in the response for UI display.
 pub async fn process_refund(
     pool:  web::Data<PgPool>,
     path:  web::Path<Uuid>,
     body:  web::Json<RefundBody>,
     auth:  RequireProcessRefunds,
 ) -> AppResult<HttpResponse> {
-    let id = path.into_inner();
-    let order = OrderRepo::new(&pool).find_by_id(id).await?
+    let id    = path.into_inner();
+    // Use find_detail to get departure_time and disruption_flag in one query.
+    let order = OrderRepo::new(&pool)
+        .find_detail(id)
+        .await?
         .ok_or_else(|| AppError::NotFound("Order".into()))?;
 
     if order.status != "cancelled" {
         return Err(AppError::Validation(
-            "Refunds can only be processed for cancelled orders".into()
+            "Refunds can only be processed for cancelled orders".into(),
         ));
     }
     if body.amount <= Decimal::ZERO {
         return Err(AppError::Validation("Refund amount must be positive".into()));
     }
-    if body.amount > order.fare_amount {
+
+    // Policy evaluation — may return RefundBlocked.
+    let decision = RulesEngine::new(&pool)
+        .evaluate_refund(order.departure_time, order.fare_amount, order.disruption_flag)
+        .await?;
+
+    if body.amount > decision.max_amount {
         return Err(AppError::RefundBlocked(format!(
-            "Refund amount {} exceeds fare {}", body.amount, order.fare_amount
+            "Requested ${} exceeds the ${} maximum for outcome {:?} — {}",
+            body.amount, decision.max_amount, decision.outcome, decision.reason,
         )));
     }
 
     OrderRepo::new(&pool).set_refunded(id, body.amount).await?;
+
+    let outcome_label = format!("{:?}", decision.outcome);
     OrderEventRepo::new(&pool).insert(&NewOrderEvent {
         order_id:     id,
         event_type:   "refunded".into(),
         performed_by: Some(auth.id),
-        reason:       None,
-        data:         Some(json!({ "amount": body.amount })),
+        reason:       Some(decision.reason.clone()),
+        data:         Some(json!({
+            "amount":      body.amount,
+            "max_amount":  decision.max_amount,
+            "outcome":     &outcome_label,
+        })),
     }).await?;
 
-    write_audit(&pool, "order_refunded", "orders", Some(id), Some(auth.id),
-        "process_refund", None, Some(json!({ "amount": body.amount })), None).await;
+    write_audit(
+        &pool, "order_refunded", "orders", Some(id), Some(auth.id),
+        "process_refund",
+        None,
+        Some(json!({
+            "amount":      body.amount,
+            "max_amount":  decision.max_amount,
+            "outcome":     &outcome_label,
+            "reason":      &decision.reason,
+        })),
+        None,
+    ).await;
 
-    Ok(HttpResponse::Ok().json(json!({ "ok": true })))
+    Ok(HttpResponse::Ok().json(json!({
+        "ok":         true,
+        "outcome":    outcome_label,
+        "max_amount": decision.max_amount,
+        "reason":     decision.reason,
+    })))
 }
 
 pub async fn apply_fee_override(

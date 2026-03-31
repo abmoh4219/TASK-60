@@ -7,6 +7,8 @@ use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
 
+use shared::UserRole;
+
 use crate::api;
 use crate::app::Route;
 use crate::auth::{AuthAction, AuthContext};
@@ -32,7 +34,8 @@ pub fn ops_layout(props: &OpsLayoutProps) -> Html {
         return html! { <Redirect<Route> to={Route::Login} /> };
     }
 
-    let user = auth.current_user().unwrap();
+    let user       = auth.current_user().unwrap();
+    let is_admin   = user.role == UserRole::Admin;
 
     // ── Sign-out ──────────────────────────────────────────────────────────
     let on_signout = {
@@ -79,6 +82,9 @@ pub fn ops_layout(props: &OpsLayoutProps) -> Html {
                 <nav class="w-52 shrink-0 bg-white border-r border-gray-200 py-4 flex flex-col gap-1">
                     { nav_item("Schedules", "🗓", Route::OpsSchedules, &props.active) }
                     { nav_item("Orders",    "🎟", Route::OpsOrders,    &props.active) }
+                    if is_admin {
+                        { nav_item("Rules", "⚙", Route::OpsRules, &props.active) }
+                    }
                     <div class="mt-auto border-t border-gray-100 pt-3 px-3">
                         <Link<Route> to={Route::Kiosk}
                             classes="flex items-center gap-2 text-xs text-gray-400 \

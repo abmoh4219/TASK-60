@@ -2,6 +2,7 @@
 
 pub mod kiosk;
 pub mod ops;
+pub mod rules;
 //!
 //! Every request (except /auth/login) is signed:
 //!   message   = "METHOD\nPATH\nUNIX_TIMESTAMP_SECS"

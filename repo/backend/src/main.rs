@@ -18,6 +18,7 @@ mod domain;
 mod error;
 mod kiosk;
 mod ops;
+mod rules;
 
 use actix_files::Files;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
@@ -33,6 +34,7 @@ use crawl::handlers as crawl_handlers;
 use kiosk::handlers as kiosk_handlers;
 use ops::orders as ops_orders;
 use ops::schedules as ops_schedules;
+use rules::handlers as rules_handlers;
 
 #[actix_web::main]
 async fn main() -> Result<()> {
@@ -162,6 +164,8 @@ async fn main() -> Result<()> {
                         web::get().to(ops_orders::find_by_number))
                     .route("/orders/{id}",
                         web::get().to(ops_orders::get_order))
+                    .route("/orders/{id}/hold",
+                        web::post().to(ops_orders::hold_order))
                     .route("/orders/{id}/confirm",
                         web::post().to(ops_orders::confirm_order))
                     .route("/orders/{id}/cancel",
@@ -174,6 +178,13 @@ async fn main() -> Result<()> {
                         web::post().to(ops_orders::flag_disruption))
                     .route("/orders/{id}/events",
                         web::get().to(ops_orders::list_order_events)),
+            )
+            // ── Business rules admin API ──────────────────────────────────
+            .service(
+                web::scope("/api/v1/rules")
+                    .route("",      web::get().to(rules_handlers::list_rules))
+                    .route("/{key}", web::get().to(rules_handlers::get_rule))
+                    .route("/{key}", web::patch().to(rules_handlers::update_rule)),
             )
             // ── Yew SPA (served last; catch-all for any non-API path) ──────
             .service(
