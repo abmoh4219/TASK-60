@@ -1,19 +1,12 @@
-//! RailOps frontend — minimal Yew skeleton.
-//! Domain components and pages are added in subsequent steps.
+mod api;
+mod app;
+mod auth;
+mod components;
+mod pages;
 
-use yew::prelude::*;
+use app::App;
 
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     yew::Renderer::<App>::new().render();
-}
-
-#[function_component(App)]
-fn app() -> Html {
-    html! {
-        <div>
-            <h1>{ "RailOps" }</h1>
-            <p>{ "System initialising…" }</p>
-        </div>
-    }
 }

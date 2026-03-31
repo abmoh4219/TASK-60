@@ -69,5 +69,8 @@ mime_guess = { version = "2" }
 bytes      = { version = "1" }
 tempfile   = { version = "3" }
 
+# ── Concurrency ───────────────────────────────────────────────────────────────
+dashmap = { version = "6" }   # lock-free map for in-memory rate limiter
+
 # ── Shared types ──────────────────────────────────────────────────────────────
 shared = { path = "../shared" }

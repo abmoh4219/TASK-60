@@ -89,6 +89,12 @@ pub fn hmac_sign(secret: &str, message: &str) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
+/// SHA-256 hex digest — used to store session token fingerprints.
+pub fn sha256_hex(input: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(input.as_bytes()))
+}
+
 /// Verify a signature in constant time.
 pub fn hmac_verify(secret: &str, message: &str, signature: &str) -> bool {
     let expected = hmac_sign(secret, message);
