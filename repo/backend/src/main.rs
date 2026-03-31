@@ -11,6 +11,8 @@
 mod auth;
 mod config;
 mod crypto;
+mod db;
+mod domain;
 mod error;
 
 use actix_files::Files;
