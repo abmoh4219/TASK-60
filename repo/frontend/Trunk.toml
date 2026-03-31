@@ -1,0 +1,10 @@
+[build]
+target      = "index.html"
+dist        = "dist"
+public_url  = "/"
+release     = false   # overridden to true in the Dockerfile (trunk build --release)
+
+[serve]
+address = "127.0.0.1"
+port    = 8080
+open    = false

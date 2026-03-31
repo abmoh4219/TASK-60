@@ -1,0 +1,102 @@
+version: "3.9"
+
+# =============================================================================
+# RailOps — docker compose up --build
+#
+# Services:
+#   db   — PostgreSQL 16 (persistent data volume)
+#   app  — Actix-web backend + Yew frontend (persistent uploads + certs volumes)
+#
+# No .env file is used.  All configuration is declared inline below.
+# Change SESSION_SECRET and ADMIN_SEED_PASSWORD before any production deployment.
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       railops
+      POSTGRES_USER:     railops
+      POSTGRES_PASSWORD: railops_dev_secret_2024   # change in production
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U railops -d railops"]
+      interval:     5s
+      timeout:      5s
+      retries:      12
+      start_period: 10s
+    networks:
+      - railops_net
+
+  # ── Application (backend API + Yew frontend) ────────────────────────────────
+  app:
+    build:
+      context:    .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Server
+      SERVER_HOST: "0.0.0.0"
+      SERVER_PORT: "8443"
+      STATIC_DIR:  "/app/static"
+
+      # Database
+      DB_HOST:            db
+      DB_PORT:            "5432"
+      DB_NAME:            railops
+      DB_USER:            railops
+      DB_PASSWORD:        railops_dev_secret_2024   # must match POSTGRES_PASSWORD above
+      DB_MAX_CONNECTIONS: "20"
+
+      # TLS  (self-signed cert generated automatically on first boot via rcgen)
+      TLS_CERT_PATH: /app/certs/cert.pem
+      TLS_KEY_PATH:  /app/certs/key.pem
+
+      # Security  — CHANGE THESE IN PRODUCTION
+      SESSION_SECRET:       "change_this_to_a_random_64_char_string_before_going_live_!!1"
+      ADMIN_SEED_PASSWORD:  "AdminRailOps2024!"   # used once; update admin pw after first login
+
+      # Logging
+      RUST_LOG: "backend=info,actix_web=info,sqlx=warn"
+
+    ports:
+      - "8443:8443"
+
+    volumes:
+      # Uploaded credential documents, drawn signatures, watermarked PDFs
+      - uploads_data:/app/uploads
+      # TLS certificate + key (generated once, persisted across restarts)
+      - tls_certs:/app/certs
+
+    networks:
+      - railops_net
+
+    healthcheck:
+      # TCP probe using bash's built-in /dev/tcp — no wget/curl required in the image.
+      # Confirms the TLS port is accepting connections; sufficient for startup ordering.
+      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/8443"]
+      interval:     15s
+      timeout:      10s
+      retries:       5
+      start_period: 60s   # allow time for first-boot migration + admin seed
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+  uploads_data:
+    driver: local
+  tls_certs:
+    driver: local
+
+# ── Network ────────────────────────────────────────────────────────────────────
+networks:
+  railops_net:
+    driver: bridge

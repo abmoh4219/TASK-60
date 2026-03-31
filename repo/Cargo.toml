@@ -1,0 +1,23 @@
+[workspace]
+members  = ["backend", "frontend", "shared"]
+resolver = "2"
+
+# ── Workspace-wide dependency pins ────────────────────────────────────────────
+[workspace.dependencies]
+# Serialization
+serde      = { version = "1",    features = ["derive"] }
+serde_json = { version = "1" }
+
+# IDs & time
+uuid   = { version = "1",   features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow    = { version = "1" }
+thiserror = { version = "1" }
+
+# Logging / tracing
+tracing = { version = "0.1" }
+
+# Decimal arithmetic (financial data)
+rust_decimal = { version = "1", features = ["serde-with-str"] }

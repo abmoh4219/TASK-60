@@ -1,0 +1,46 @@
+# Rust
+/target/
+backend/target/
+frontend/target/
+shared/target/
+**/*.rs.bk
+Cargo.lock          # committed for applications; remove this line if desired
+
+# Build artifacts
+dist/
+frontend/dist/
+*.wasm
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# Docker
+.dockerignore
+
+# SQLx offline cache (commit if you want reproducible offline builds)
+# .sqlx/
+
+# TLS certs (generated at runtime via rcgen; do not commit)
+certs/
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Uploads (runtime data)
+uploads/
+
+# Logs
+*.log
+logs/
+
+# Environment (no .env allowed per project rules)
+.env
+.env.*
+
+# OS
+Thumbs.db

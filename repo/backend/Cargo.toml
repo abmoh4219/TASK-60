@@ -1,0 +1,73 @@
+[package]
+name    = "backend"
+version = "0.1.0"
+edition = "2021"
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+[dependencies]
+actix-web       = { version = "4",   features = ["rustls-0_23"] }
+actix-files     = { version = "0.6" }
+actix-cors      = { version = "0.7" }
+actix-multipart = { version = "0.7" }
+
+# ── Async runtime ─────────────────────────────────────────────────────────────
+tokio        = { version = "1",   features = ["full"] }
+futures      = { version = "0.3" }
+async-trait  = { version = "0.1" }
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "uuid",
+    "chrono",
+    "json",
+    "rust_decimal",
+    "migrate",
+] }
+
+# ── Serialization ─────────────────────────────────────────────────────────────
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# ── Error handling ────────────────────────────────────────────────────────────
+anyhow    = { workspace = true }
+thiserror = { workspace = true }
+
+# ── Logging / tracing ─────────────────────────────────────────────────────────
+tracing             = { workspace = true }
+tracing-subscriber  = { version = "0.3", features = ["env-filter", "json", "fmt"] }
+tracing-actix-web   = { version = "0.7" }
+
+# ── IDs & time ────────────────────────────────────────────────────────────────
+uuid   = { workspace = true }
+chrono = { workspace = true }
+
+# ── Security / Crypto ─────────────────────────────────────────────────────────
+argon2       = { version = "0.5",  features = ["std"] }
+aes-gcm      = { version = "0.10" }
+sha2         = { version = "0.10" }
+hmac         = { version = "0.12" }
+rand         = { version = "0.8",  features = ["std"] }
+rand_core    = { version = "0.6",  features = ["std"] }
+hex          = { version = "0.4" }
+base64       = { version = "0.22" }
+subtle       = { version = "2" }  # constant-time comparisons
+
+# ── TLS ───────────────────────────────────────────────────────────────────────
+rustls         = { version = "0.23" }
+rustls-pemfile = { version = "2" }
+rcgen          = { version = "0.12" }   # self-signed cert generation on first boot
+
+# ── Decimal ───────────────────────────────────────────────────────────────────
+rust_decimal = { workspace = true }
+
+# ── File / MIME ───────────────────────────────────────────────────────────────
+mime       = { version = "0.3" }
+mime_guess = { version = "2" }
+bytes      = { version = "1" }
+tempfile   = { version = "3" }
+
+# ── Shared types ──────────────────────────────────────────────────────────────
+shared = { path = "../shared" }

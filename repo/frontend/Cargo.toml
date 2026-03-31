@@ -1,0 +1,55 @@
+[package]
+name    = "frontend"
+version = "0.1.0"
+edition = "2021"
+
+# Trunk builds this as a WASM binary target
+[[bin]]
+name = "frontend"
+path = "src/main.rs"
+
+# ── Yew framework ─────────────────────────────────────────────────────────────
+[dependencies]
+yew        = { version = "0.21", features = ["csr"] }
+yew-router = { version = "0.18" }
+
+# ── WASM bindings ─────────────────────────────────────────────────────────────
+wasm-bindgen         = { version = "0.2" }
+wasm-bindgen-futures = { version = "0.4" }
+js-sys               = { version = "0.3" }
+
+web-sys = { version = "0.3", features = [
+    "Window", "Document", "Element", "HtmlElement",
+    "HtmlInputElement", "HtmlTextAreaElement", "HtmlSelectElement",
+    "HtmlFormElement", "HtmlCanvasElement", "CanvasRenderingContext2d",
+    "Event", "MouseEvent", "InputEvent", "SubmitEvent", "KeyboardEvent",
+    "Storage", "Location", "History",
+    "Request", "RequestInit", "RequestMode", "Response", "Headers",
+    "FormData", "File", "FileList", "Blob", "Url",
+    "console",
+] }
+
+# ── Network ───────────────────────────────────────────────────────────────────
+gloo-net     = { version = "0.5" }
+gloo-storage = { version = "0.3" }
+gloo-timers  = { version = "0.3", features = ["futures"] }
+gloo-utils   = { version = "0.2" }
+
+# ── Serialization ─────────────────────────────────────────────────────────────
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# ── IDs & time (wasm-compatible) ──────────────────────────────────────────────
+uuid   = { workspace = true }
+chrono = { version = "0.4", features = ["serde", "wasmbind"] }
+
+# ── Error handling ────────────────────────────────────────────────────────────
+anyhow    = { workspace = true }
+thiserror = { workspace = true }
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+wasm-logger = { version = "0.2" }
+log         = { version = "0.4" }
+
+# ── Shared types ──────────────────────────────────────────────────────────────
+shared = { path = "../shared" }
