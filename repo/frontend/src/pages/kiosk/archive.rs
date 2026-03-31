@@ -145,9 +145,9 @@ pub fn kiosk_archive() -> Html {
         archive_skeleton()
     } else if let Some(msg) = &*error {
         html! {
-            <div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-red-700">
-                <p class="font-semibold mb-1">{"Unable to load archive"}</p>
-                <p class="text-sm">{ msg.clone() }</p>
+            <div class="bg-red-50 border border-red-200 rounded-2xl p-6">
+                <p class="font-semibold text-red-800 mb-1">{"Unable to load archive"}</p>
+                <p class="text-sm text-red-600">{ msg.clone() }</p>
             </div>
         }
     } else if let Some(d) = &*data {
@@ -163,19 +163,19 @@ pub fn kiosk_archive() -> Html {
     let crumb_year  = params.year;
     let crumb_month = params.month;
     let breadcrumb = html! {
-        <nav class="flex items-center gap-2 text-sm text-gray-500 mb-8"
+        <nav class="flex items-center gap-2 text-sm text-slate-500 mb-8"
              aria-label="Breadcrumb">
             <Link<Route> to={Route::Kiosk}
-                classes="hover:text-blue-700 transition">{"Home"}</Link<Route>>
-            <span aria-hidden="true">{"/"}</span>
+                classes="hover:text-indigo-700 transition">{"Home"}</Link<Route>>
+            <span aria-hidden="true" class="text-slate-300">{"/"}</span>
             <Link<Route> to={Route::KioskArchive}
-                classes="hover:text-blue-700 transition">{"Archive"}</Link<Route>>
+                classes="hover:text-indigo-700 transition">{"Archive"}</Link<Route>>
             {
                 if let Some(y) = crumb_year {
                     html! {
                         <>
-                            <span aria-hidden="true">{"/"}</span>
-                            <span class="text-gray-700">{ y.to_string() }</span>
+                            <span aria-hidden="true" class="text-slate-300">{"/"}</span>
+                            <span class="text-slate-700">{ y.to_string() }</span>
                         </>
                     }
                 } else { html! {} }
@@ -184,8 +184,8 @@ pub fn kiosk_archive() -> Html {
                 if let (Some(_), Some(m)) = (crumb_year, crumb_month) {
                     html! {
                         <>
-                            <span aria-hidden="true">{"/"}</span>
-                            <span class="text-gray-700">{ month_name(m) }</span>
+                            <span aria-hidden="true" class="text-slate-300">{"/"}</span>
+                            <span class="text-slate-700">{ month_name(m) }</span>
                         </>
                     }
                 } else { html! {} }
@@ -202,8 +202,8 @@ pub fn kiosk_archive() -> Html {
                 <div class="flex gap-8">
                     // ── Sidebar ───────────────────────────────────────────
                     <aside class="w-52 shrink-0 hidden lg:block">
-                        <div class="bg-white rounded-2xl border border-gray-200 p-4">
-                            <h3 class="text-xs font-semibold text-gray-500 uppercase
+                        <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                            <h3 class="text-xs font-semibold text-slate-500 uppercase
                                        tracking-wider mb-3">
                                 {"Category"}
                             </h3>
@@ -227,7 +227,7 @@ pub fn kiosk_archive() -> Html {
                                                 class={sidebar_btn_class(active)}
                                             >
                                                 <span>{ category_label(&cc.category) }</span>
-                                                <span class="ml-auto text-xs text-gray-400">
+                                                <span class="ml-auto text-xs text-slate-400">
                                                     { cnt }
                                                 </span>
                                             </button>
@@ -259,8 +259,7 @@ fn index_view(
     if idx.entries.is_empty() {
         return html! {
             <div class="text-center py-20">
-                <div class="text-5xl mb-4">{"📅"}</div>
-                <p class="text-gray-500">{"No archived articles yet."}</p>
+                <p class="text-slate-500">{"No archived articles yet."}</p>
             </div>
         };
     }
@@ -279,27 +278,29 @@ fn index_view(
 
     html! {
         <div>
-            <h1 class="text-2xl font-bold text-gray-900 mb-8">{"Article Archive"}</h1>
+            <h1 class="text-2xl font-bold text-slate-900 mb-8">{"Article Archive"}</h1>
             { for by_year.iter().map(|(year, entries)| {
                 let y = *year;
                 html! {
                     <div key={y} class="mb-10">
-                        <h2 class="text-lg font-semibold text-gray-500 mb-4">{ y }</h2>
+                        <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">
+                            { y }
+                        </h2>
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                             { for entries.iter().map(|e| {
                                 html! {
                                     <button
                                         key={e.month}
                                         onclick={make_month_cb(e.year, e.month)}
-                                        class="bg-white rounded-xl border border-gray-200 p-4 \
-                                               text-left hover:shadow-md hover:border-blue-300 \
-                                               active:scale-95 transition group"
+                                        class="bg-white rounded-xl border border-slate-200 p-4 \
+                                               text-left hover:shadow-md hover:border-indigo-300 \
+                                               hover:bg-indigo-50/30 active:scale-95 transition group"
                                     >
-                                        <div class="font-semibold text-gray-800
-                                                    group-hover:text-blue-700 transition">
+                                        <div class="font-semibold text-slate-800
+                                                    group-hover:text-indigo-700 transition">
                                             { month_name(e.month) }
                                         </div>
-                                        <div class="text-xs text-gray-400 mt-1">
+                                        <div class="text-xs text-slate-400 mt-1">
                                             { format!("{} articles", e.count) }
                                         </div>
                                     </button>
@@ -323,16 +324,15 @@ fn articles_view(
     html! {
         <div>
             <div class="flex items-center justify-between mb-6">
-                <h1 class="text-2xl font-bold text-gray-900">{ heading }</h1>
-                <span class="text-sm text-gray-500">
+                <h1 class="text-2xl font-bold text-slate-900">{ heading }</h1>
+                <span class="text-sm text-slate-500">
                     { format!("{} articles", arts.total) }
                 </span>
             </div>
 
             if arts.items.is_empty() {
                 <div class="text-center py-20">
-                    <div class="text-5xl mb-4">{"📭"}</div>
-                    <p class="text-gray-500">{"No articles for this period."}</p>
+                    <p class="text-slate-500">{"No articles for this period."}</p>
                 </div>
             } else {
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
@@ -381,12 +381,12 @@ fn archive_pagination(
 fn archive_skeleton() -> Html {
     html! {
         <div class="animate-pulse">
-            <div class="h-8 bg-gray-200 rounded w-48 mb-8"></div>
+            <div class="h-8 bg-slate-200 rounded w-48 mb-8"></div>
             <div class="mb-10">
-                <div class="h-5 bg-gray-200 rounded w-12 mb-4"></div>
+                <div class="h-4 bg-slate-200 rounded w-12 mb-4"></div>
                 <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                     { for (0..8).map(|_| html! {
-                        <div class="bg-white rounded-xl border border-gray-200 p-4 h-16"></div>
+                        <div class="bg-white rounded-xl border border-slate-200 p-4 h-16"></div>
                     }) }
                 </div>
             </div>
@@ -397,16 +397,16 @@ fn archive_skeleton() -> Html {
 fn sidebar_btn_class(active: bool) -> &'static str {
     if active {
         "w-full flex items-center text-left px-3 py-2 rounded-lg \
-         bg-blue-50 text-blue-700 font-semibold text-sm"
+         bg-indigo-50 text-indigo-700 font-semibold text-sm"
     } else {
         "w-full flex items-center text-left px-3 py-2 rounded-lg \
-         text-gray-700 text-sm hover:bg-gray-50 transition"
+         text-slate-700 text-sm hover:bg-slate-50 transition"
     }
 }
 
 fn page_btn_class(active: bool, disabled: bool) -> &'static str {
-    if disabled      { "w-9 h-9 rounded-lg text-sm text-gray-300 cursor-not-allowed" }
-    else if active   { "w-9 h-9 rounded-lg text-sm bg-blue-700 text-white font-bold" }
-    else             { "w-9 h-9 rounded-lg text-sm border border-gray-200 \
-                        text-gray-700 hover:bg-gray-50" }
+    if disabled      { "w-9 h-9 rounded-lg text-sm text-slate-300 cursor-not-allowed" }
+    else if active   { "w-9 h-9 rounded-lg text-sm bg-indigo-700 text-white font-bold" }
+    else             { "w-9 h-9 rounded-lg text-sm border border-slate-200 \
+                        text-slate-700 hover:bg-slate-50" }
 }

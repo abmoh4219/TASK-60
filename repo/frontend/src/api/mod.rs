@@ -1,8 +1,10 @@
 //! Typed API client for the RailOps backend.
 
+pub mod credentials;
 pub mod kiosk;
 pub mod ops;
 pub mod rules;
+pub mod staffing;
 //!
 //! Every request (except /auth/login) is signed:
 //!   message   = "METHOD\nPATH\nUNIX_TIMESTAMP_SECS"
@@ -166,7 +168,7 @@ pub(crate) async fn parse_json<T: DeserializeOwned>(resp: Response) -> ApiResult
     }
 }
 
-fn hmac_sign(token: &str, message: &str) -> String {
+pub(crate) fn hmac_sign(token: &str, message: &str) -> String {
     type HmacSha256 = Hmac<Sha256>;
     let mut mac = HmacSha256::new_from_slice(token.as_bytes())
         .expect("HMAC accepts any key length");
@@ -174,7 +176,7 @@ fn hmac_sign(token: &str, message: &str) -> String {
     hex::encode(mac.finalize().into_bytes())
 }
 
-fn unix_now() -> i64 {
+pub(crate) fn unix_now() -> i64 {
     // chrono wasmbind feature provides JS Date.now() based time in WASM.
     chrono::Utc::now().timestamp()
 }

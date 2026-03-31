@@ -1,10 +1,25 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="RailOps — Rail Operations & Booking Platform" />
     <title>RailOps</title>
-    <!-- Trunk injects the compiled WASM bundle here -->
+
+    <!--
+      Tailwind CSS is generated at Docker build time by the standalone Tailwind CLI
+      (see Dockerfile frontend-builder stage).  trunk copies the generated file to
+      dist/ and updates this href automatically — no CDN or internet access required.
+    -->
+    <link data-trunk rel="stylesheet" href="tailwind.css" />
+
+    <!--
+      Inter is the preferred UI font.  It is loaded from the system font stack when
+      not available (no external CDN dependency).  The Tailwind config declares the
+      same fallback chain: 'Inter', system-ui, -apple-system, sans-serif.
+    -->
   </head>
-  <body></body>
+  <body class="h-full bg-slate-50 text-slate-900 font-sans antialiased">
+    <!-- Trunk injects the compiled WASM bundle here -->
+  </body>
 </html>

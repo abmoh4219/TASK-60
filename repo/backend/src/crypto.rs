@@ -102,3 +102,75 @@ pub fn hmac_verify(secret: &str, message: &str, signature: &str) -> bool {
     use subtle::ConstantTimeEq;
     expected.as_bytes().ct_eq(signature.as_bytes()).into()
 }
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn password_round_trip() {
+        println!("[crypto] password_round_trip: hashing 'SecureP@ss123'");
+        let hash = hash_password("SecureP@ss123").expect("hash succeeded");
+        assert!(hash.starts_with("$argon2id$"), "hash should be argon2id PHC format");
+        assert!(verify_password("SecureP@ss123", &hash).unwrap(), "correct password verifies");
+        assert!(!verify_password("wrong_password", &hash).unwrap(), "wrong password rejected");
+        println!("[crypto] password_round_trip: PASS");
+    }
+
+    #[test]
+    fn aes_gcm_round_trip() {
+        println!("[crypto] aes_gcm_round_trip: encrypting PII");
+        let key = derive_aes_key("test-secret-key-for-aes");
+        let plaintext = "passenger@email.com";
+        let blob = encrypt_pii(plaintext, &key).expect("encryption succeeded");
+        assert!(blob.len() > 12, "blob contains nonce + ciphertext");
+        let recovered = decrypt_pii(&blob, &key).expect("decryption succeeded");
+        assert_eq!(recovered, plaintext, "round-trip matches");
+        println!("[crypto] aes_gcm_round_trip: PASS");
+    }
+
+    #[test]
+    fn aes_gcm_wrong_key_fails() {
+        println!("[crypto] aes_gcm_wrong_key_fails");
+        let key1 = derive_aes_key("secret-key-one");
+        let key2 = derive_aes_key("secret-key-two");
+        let blob = encrypt_pii("sensitive-data", &key1).expect("encrypt ok");
+        assert!(decrypt_pii(&blob, &key2).is_err(), "wrong key should fail to decrypt");
+        println!("[crypto] aes_gcm_wrong_key_fails: PASS");
+    }
+
+    #[test]
+    fn hmac_sign_and_verify() {
+        println!("[crypto] hmac_sign_and_verify");
+        let secret  = "super-secret";
+        let message = "GET /api/v1/rules 1700000000";
+        let sig = hmac_sign(secret, message);
+        assert_eq!(sig.len(), 64, "HMAC-SHA256 hex is 64 chars");
+        assert!(hmac_verify(secret, message, &sig),  "correct sig verifies");
+        assert!(!hmac_verify(secret, "tampered",  &sig), "tampered message rejected");
+        assert!(!hmac_verify("wrong", message,   &sig), "wrong secret rejected");
+        println!("[crypto] hmac_sign_and_verify: PASS");
+    }
+
+    #[test]
+    fn sha256_hex_deterministic() {
+        println!("[crypto] sha256_hex_deterministic");
+        let h1 = sha256_hex("hello world");
+        let h2 = sha256_hex("hello world");
+        let h3 = sha256_hex("hello world!");
+        assert_eq!(h1, h2, "same input gives same hash");
+        assert_ne!(h1, h3, "different input gives different hash");
+        assert_eq!(h1.len(), 64, "SHA-256 hex is 64 chars");
+        println!("[crypto] sha256_hex_deterministic: PASS");
+    }
+
+    #[test]
+    fn derive_aes_key_length() {
+        println!("[crypto] derive_aes_key_length");
+        let key = derive_aes_key("any-secret");
+        assert_eq!(key.len(), 32, "AES key must be exactly 32 bytes");
+        println!("[crypto] derive_aes_key_length: PASS");
+    }
+}

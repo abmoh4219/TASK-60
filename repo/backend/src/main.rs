@@ -12,6 +12,7 @@
 mod auth;
 mod config;
 mod crawl;
+mod credentials;
 mod crypto;
 mod db;
 mod domain;
@@ -19,6 +20,7 @@ mod error;
 mod kiosk;
 mod ops;
 mod rules;
+mod staffing;
 
 use actix_files::Files;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
@@ -31,10 +33,12 @@ use auth::middleware::RateLimiter;
 use config::AppConfig;
 use crawl::engine::{CrawlEngine, TriggerHandle};
 use crawl::handlers as crawl_handlers;
+use credentials::handlers as credentials_handlers;
 use kiosk::handlers as kiosk_handlers;
 use ops::orders as ops_orders;
 use ops::schedules as ops_schedules;
 use rules::handlers as rules_handlers;
+use staffing::handlers as staffing_handlers;
 
 #[actix_web::main]
 async fn main() -> Result<()> {
@@ -185,6 +189,70 @@ async fn main() -> Result<()> {
                     .route("",      web::get().to(rules_handlers::list_rules))
                     .route("/{key}", web::get().to(rules_handlers::get_rule))
                     .route("/{key}", web::patch().to(rules_handlers::update_rule)),
+            )
+            // ── Staffing console API ───────────────────────────────────────
+            .service(
+                web::scope("/api/v1/staffing")
+                    // Contractors
+                    .route("/contractors",
+                        web::get().to(staffing_handlers::list_contractors))
+                    .route("/contractors",
+                        web::post().to(staffing_handlers::create_contractor))
+                    .route("/contractors/{id}",
+                        web::get().to(staffing_handlers::get_contractor))
+                    .route("/contractors/{id}/active",
+                        web::patch().to(staffing_handlers::set_contractor_active))
+                    .route("/contractors/{id}/availability",
+                        web::post().to(staffing_handlers::add_availability))
+                    // Shifts
+                    .route("/shifts",
+                        web::get().to(staffing_handlers::list_shifts))
+                    .route("/shifts",
+                        web::post().to(staffing_handlers::create_shift))
+                    .route("/shifts/{id}",
+                        web::get().to(staffing_handlers::get_shift))
+                    .route("/shifts/{id}/status",
+                        web::patch().to(staffing_handlers::update_shift_status))
+                    .route("/shifts/{id}/candidates",
+                        web::get().to(staffing_handlers::get_candidates))
+                    .route("/shifts/{id}/propose",
+                        web::post().to(staffing_handlers::propose_assignment))
+                    // Assignments
+                    .route("/assignments/{id}/respond",
+                        web::patch().to(staffing_handlers::respond_assignment))
+                    // Subscriptions
+                    .route("/subscriptions",
+                        web::get().to(staffing_handlers::list_subscriptions))
+                    .route("/subscriptions",
+                        web::post().to(staffing_handlers::subscribe))
+                    .route("/subscriptions",
+                        web::delete().to(staffing_handlers::unsubscribe)),
+            )
+            // ── Credential document management API ───────────────────────
+            .service(
+                web::scope("/api/v1/credentials")
+                    .route("",
+                        web::get().to(credentials_handlers::list_credentials))
+                    .route("",
+                        web::post().to(credentials_handlers::upload_credential))
+                    .route("/expire",
+                        web::post().to(credentials_handlers::run_expiry_sweep))
+                    .route("/{id}",
+                        web::get().to(credentials_handlers::get_credential))
+                    .route("/{id}/review",
+                        web::patch().to(credentials_handlers::review_credential))
+                    .route("/{id}/audit",
+                        web::get().to(credentials_handlers::get_credential_audit))
+                    .route("/{id}/esign",
+                        web::post().to(credentials_handlers::esign_credential)),
+            )
+            // ── E-signature API ───────────────────────────────────────────
+            .service(
+                web::scope("/api/v1/esignatures")
+                    .route("",
+                        web::post().to(credentials_handlers::create_esignature))
+                    .route("/{entity_type}/{entity_id}",
+                        web::get().to(credentials_handlers::list_esignatures)),
             )
             // ── Yew SPA (served last; catch-all for any non-API path) ──────
             .service(

@@ -207,22 +207,22 @@ pub fn kiosk_search() -> Html {
                             autocomplete="off"
                             value={(*raw_input).clone()}
                             oninput={on_input}
-                            class="w-full rounded-xl border border-gray-300 px-5 py-3 pr-10
-                                   text-base shadow-sm focus:border-blue-500 focus:outline-none
-                                   focus:ring-2 focus:ring-blue-200"
+                            class="w-full rounded-xl border border-slate-300 px-5 py-3 pr-10
+                                   text-base shadow-sm focus:border-indigo-500 focus:outline-none
+                                   focus:ring-2 focus:ring-indigo-200"
                         />
                         if !active_q.is_empty() {
                             <button
                                 onclick={on_clear_query}
-                                class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400
-                                       hover:text-gray-700 text-xl leading-none"
+                                class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400
+                                       hover:text-slate-700 text-xl leading-none"
                                 title="Clear search"
                             >{"×"}</button>
                         }
                     </div>
                     <Link<Route> to={Route::Kiosk}
-                        classes="rounded-xl border border-gray-300 px-4 py-3 text-sm font-medium \
-                                 text-gray-600 hover:bg-gray-50 transition">
+                        classes="rounded-xl border border-slate-300 px-4 py-3 text-sm font-medium \
+                                 text-slate-600 hover:bg-slate-50 transition">
                         {"← Home"}
                     </Link<Route>>
                 </div>
@@ -234,8 +234,8 @@ pub fn kiosk_search() -> Html {
                     // ── Sidebar ───────────────────────────────────────────
                     <aside class="w-56 shrink-0 hidden lg:block">
                         // Category filter
-                        <div class="bg-white rounded-2xl border border-gray-200 p-4 mb-4">
-                            <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                        <div class="bg-white rounded-2xl border border-slate-200 p-4 mb-4">
+                            <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
                                 {"Category"}
                             </h3>
                             <ul class="space-y-1">
@@ -258,7 +258,7 @@ pub fn kiosk_search() -> Html {
                                                 class={sidebar_btn_class(active)}
                                             >
                                                 <span>{ category_label(&cc.category) }</span>
-                                                <span class="ml-auto text-xs text-gray-400">{ cnt }</span>
+                                                <span class="ml-auto text-xs text-slate-400">{ cnt }</span>
                                             </button>
                                         </li>
                                     }
@@ -268,8 +268,8 @@ pub fn kiosk_search() -> Html {
 
                         // Top tags
                         if !(*top_tags).is_empty() {
-                            <div class="bg-white rounded-2xl border border-gray-200 p-4">
-                                <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                                <h3 class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">
                                     {"Popular Tags"}
                                 </h3>
                                 <div class="flex flex-wrap gap-2">
@@ -281,11 +281,11 @@ pub fn kiosk_search() -> Html {
                                                 key={tag.clone()}
                                                 onclick={make_tag_cb(if active { None } else { Some(tag) })}
                                                 class={if active {
-                                                    "text-xs rounded-full px-2.5 py-0.5 bg-blue-600 \
+                                                    "text-xs rounded-full px-2.5 py-0.5 bg-indigo-600 \
                                                      text-white font-medium"
                                                 } else {
-                                                    "text-xs rounded-full px-2.5 py-0.5 bg-gray-100 \
-                                                     text-gray-700 hover:bg-blue-100 hover:text-blue-700"
+                                                    "text-xs rounded-full px-2.5 py-0.5 bg-slate-100 \
+                                                     text-slate-700 hover:bg-indigo-100 hover:text-indigo-700"
                                                 }}
                                             >
                                                 { &tc.tag }
@@ -334,10 +334,10 @@ fn active_chips(
                         nav2.push_with_query(&Route::KioskSearch, &qq).ok();
                     });
                     html! {
-                        <span class="inline-flex items-center gap-1 rounded-full bg-blue-100
-                                     text-blue-800 text-sm px-3 py-1 font-medium">
+                        <span class="inline-flex items-center gap-1 rounded-full bg-indigo-100
+                                     text-indigo-800 text-sm px-3 py-1 font-medium">
                             { format!("Category: {}", category_label(&c2)) }
-                            <button onclick={onclick} class="ml-1 text-blue-600 hover:text-blue-900">
+                            <button onclick={onclick} class="ml-1 text-indigo-600 hover:text-indigo-900">
                                 {"×"}
                             </button>
                         </span>
@@ -356,10 +356,10 @@ fn active_chips(
                         nav2.push_with_query(&Route::KioskSearch, &qq).ok();
                     });
                     html! {
-                        <span class="inline-flex items-center gap-1 rounded-full bg-gray-100
-                                     text-gray-700 text-sm px-3 py-1 font-medium">
+                        <span class="inline-flex items-center gap-1 rounded-full bg-slate-100
+                                     text-slate-700 text-sm px-3 py-1 font-medium">
                             { format!("Tag: #{}", t2) }
-                            <button onclick={onclick} class="ml-1 hover:text-gray-900">
+                            <button onclick={onclick} class="ml-1 hover:text-slate-900">
                                 {"×"}
                             </button>
                         </span>
@@ -381,10 +381,10 @@ fn results_panel(
         return html! {
             <div class="space-y-4">
                 { for (0..6).map(|_| html! {
-                    <div class="bg-white rounded-2xl border border-gray-200 p-5 animate-pulse">
-                        <div class="h-4 bg-gray-200 rounded w-20 mb-3"></div>
-                        <div class="h-5 bg-gray-200 rounded w-4/5 mb-2"></div>
-                        <div class="h-3 bg-gray-100 rounded w-16"></div>
+                    <div class="bg-white rounded-2xl border border-slate-200 p-5 animate-pulse">
+                        <div class="h-4 bg-slate-200 rounded-full w-20 mb-3"></div>
+                        <div class="h-5 bg-slate-200 rounded w-4/5 mb-2"></div>
+                        <div class="h-3 bg-slate-100 rounded w-16"></div>
                     </div>
                 }) }
             </div>
@@ -414,11 +414,10 @@ fn results_panel(
         if resp.items.is_empty() {
             return html! {
                 <div class="text-center py-16">
-                    <div class="text-5xl mb-4">{"🔍"}</div>
-                    <p class="text-lg font-semibold text-gray-700 mb-2">
+                    <p class="text-lg font-semibold text-slate-700 mb-2">
                         { format!("No results for \"{active_q}\"") }
                     </p>
-                    <p class="text-gray-500 text-sm">
+                    <p class="text-slate-500 text-sm">
                         {"Try different keywords, or browse by category."}
                     </p>
                 </div>
@@ -430,7 +429,7 @@ fn results_panel(
         html! {
             <div>
                 <div class="flex items-center justify-between mb-4">
-                    <p class="text-sm text-gray-600">{ heading }</p>
+                    <p class="text-sm text-slate-600">{ heading }</p>
                     if is_fuzzy {
                         <span class="text-xs text-amber-700 bg-amber-50 border border-amber-200
                                      rounded-full px-2.5 py-1 font-medium">
@@ -451,9 +450,8 @@ fn results_panel(
         }
     } else {
         html! {
-            <div class="text-center py-16 text-gray-400">
-                <p>{"Start typing to search, or browse by category."}
-                </p>
+            <div class="text-center py-16 text-slate-400">
+                <p>{"Start typing to search, or browse by category."}</p>
             </div>
         }
     }
@@ -512,17 +510,18 @@ fn visible_pages(current: i64, total: i64) -> Vec<i64> {
 }
 
 fn page_btn_class(active: bool, disabled: bool) -> &'static str {
-    if disabled { "w-9 h-9 rounded-lg text-sm text-gray-300 cursor-not-allowed" }
-    else if active { "w-9 h-9 rounded-lg text-sm bg-blue-700 text-white font-bold" }
-    else { "w-9 h-9 rounded-lg text-sm border border-gray-200 text-gray-700 hover:bg-gray-50" }
+    if disabled      { "w-9 h-9 rounded-lg text-sm text-slate-300 cursor-not-allowed" }
+    else if active   { "w-9 h-9 rounded-lg text-sm bg-indigo-700 text-white font-bold" }
+    else             { "w-9 h-9 rounded-lg text-sm border border-slate-200 \
+                        text-slate-700 hover:bg-slate-50" }
 }
 
 fn sidebar_btn_class(active: bool) -> &'static str {
     if active {
         "w-full flex items-center text-left px-3 py-2 rounded-lg \
-         bg-blue-50 text-blue-700 font-semibold text-sm"
+         bg-indigo-50 text-indigo-700 font-semibold text-sm"
     } else {
         "w-full flex items-center text-left px-3 py-2 rounded-lg \
-         text-gray-700 text-sm hover:bg-gray-50 transition"
+         text-slate-700 text-sm hover:bg-slate-50 transition"
     }
 }

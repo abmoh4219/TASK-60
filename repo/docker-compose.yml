@@ -3,9 +3,12 @@ version: "3.9"
 # =============================================================================
 # RailOps — docker compose up --build
 #
-# Services:
-#   db   — PostgreSQL 16 (persistent data volume)
-#   app  — Actix-web backend + Yew frontend (persistent uploads + certs volumes)
+# Services (default profile):
+#   db      — PostgreSQL 16 (persistent data volume)
+#   app     — Actix-web backend + Yew frontend (persistent uploads + certs volumes)
+#
+# Services (test profile — started by run-test.sh):
+#   tester  — cargo test runner; targets the live `app` service at https://app:8443
 #
 # No .env file is used.  All configuration is declared inline below.
 # Change SESSION_SECRET and ADMIN_SEED_PASSWORD before any production deployment.
@@ -86,6 +89,49 @@ services:
       timeout:      10s
       retries:       5
       start_period: 60s   # allow time for first-boot migration + admin seed
+
+  # ── Test runner (cargo test suite) ─────────────────────────────────────────
+  # Only activated with:  docker compose --profile test run --rm tester
+  # Inherits the full Rust toolchain from the backend-builder Docker stage.
+  # Connects to `app` on the internal railops_net network (https://app:8443).
+  tester:
+    build:
+      context:    .
+      dockerfile: Dockerfile
+      target:     tester        # Uses the dedicated tester stage (has cargo + curl)
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # Integration tests read this to form request URLs.
+      TEST_BASE_URL: "https://app:8443"
+      # Silence noisy sqlx / actix logs during test compilation.
+      RUST_LOG:      "off"
+    # Three test suites run in sequence:
+    #   1. Backend unit tests  (crypto, pipeline — no DB required)
+    #   2. Shared utility tests (QualityScore, PaginationParams, mask_phone)
+    #   3. API integration tests (real HTTP to live app, real PostgreSQL)
+    command: >
+      sh -c "set -e;
+        echo '';
+        echo '╔══════════════════════════════════════════════╗';
+        echo '║  RailOps — Docker Test Suite                 ║';
+        echo '╚══════════════════════════════════════════════╝';
+        echo '';
+        echo '── [1/3] Backend unit tests ──────────────────────';
+        cargo test --lib -p backend -- --nocapture;
+        echo '';
+        echo '── [2/3] Shared / frontend utility tests ─────────';
+        cargo test -p shared -- --nocapture;
+        echo '';
+        echo '── [3/3] API integration tests ───────────────────';
+        cargo test --test api_integration_test -p backend -- --nocapture;
+        echo '';
+        echo '══ All tests passed ══════════════════════════════'"
+    networks:
+      - railops_net
+    profiles:
+      - test
 
 # ── Named volumes ──────────────────────────────────────────────────────────────
 volumes:

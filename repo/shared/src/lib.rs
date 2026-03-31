@@ -269,3 +269,155 @@ pub mod rules {
     /// Max file upload size (10 MB).
     pub const MAX_UPLOAD_BYTES:          u64 = 10 * 1024 * 1024;
 }
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+//
+// These tests cover shared utility functions used by both the frontend (Yew)
+// and backend.  They run on native targets (`cargo test -p shared`) so they
+// execute inside the Docker tester container without a WASM runtime.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    // ── QualityScore ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn quality_score_compute_weights() {
+        println!("[shared] quality_score_compute_weights");
+        // completeness 100, accuracy 100, timeliness 100 → total 100
+        let s = QualityScore::compute(
+            Decimal::new(100, 0),
+            Decimal::new(100, 0),
+            Decimal::new(100, 0),
+        );
+        assert_eq!(s.total, Decimal::new(100, 0), "all-100 inputs → 100 total");
+
+        // completeness 0, accuracy 0, timeliness 0 → total 0
+        let z = QualityScore::compute(
+            Decimal::ZERO,
+            Decimal::ZERO,
+            Decimal::ZERO,
+        );
+        assert_eq!(z.total, Decimal::ZERO, "all-zero inputs → 0 total");
+        println!("[shared] quality_score_compute_weights: PASS");
+    }
+
+    #[test]
+    fn quality_score_weighted_formula() {
+        println!("[shared] quality_score_weighted_formula");
+        // 50% completeness, 30% accuracy, 20% timeliness
+        // completeness=80, accuracy=60, timeliness=40
+        // expected = 80*0.5 + 60*0.3 + 40*0.2 = 40 + 18 + 8 = 66
+        let s = QualityScore::compute(
+            Decimal::new(80, 0),
+            Decimal::new(60, 0),
+            Decimal::new(40, 0),
+        );
+        assert_eq!(s.total, Decimal::new(66, 0), "weighted total must equal 66");
+        assert_eq!(s.completeness, Decimal::new(80, 0));
+        assert_eq!(s.accuracy,     Decimal::new(60, 0));
+        assert_eq!(s.timeliness,   Decimal::new(40, 0));
+        println!("[shared] quality_score_weighted_formula: PASS");
+    }
+
+    #[test]
+    fn quality_score_publishable_threshold() {
+        println!("[shared] quality_score_publishable_threshold");
+        // Score exactly at threshold (85) → publishable
+        let at_threshold = QualityScore::compute(
+            Decimal::new(85, 0),
+            Decimal::new(85, 0),
+            Decimal::new(85, 0),
+        );
+        assert!(at_threshold.is_publishable(),
+            "score == 85 should be publishable");
+
+        // Score just below threshold → not publishable
+        // completeness=80 accuracy=80 timeliness=80 → total = 80
+        let below = QualityScore::compute(
+            Decimal::new(80, 0),
+            Decimal::new(80, 0),
+            Decimal::new(80, 0),
+        );
+        assert!(!below.is_publishable(),
+            "score == 80 should NOT be publishable (threshold is 85)");
+
+        println!("[shared] quality_score_publishable_threshold: PASS");
+    }
+
+    // ── PaginationParams ──────────────────────────────────────────────────────
+
+    #[test]
+    fn pagination_params_defaults() {
+        println!("[shared] pagination_params_defaults");
+        let p = PaginationParams::default();
+        assert_eq!(p.page(),     1,  "default page is 1");
+        assert_eq!(p.per_page(), 20, "default per_page is 20");
+        assert_eq!(p.offset(),   0,  "offset for page 1 is 0");
+        println!("[shared] pagination_params_defaults: PASS");
+    }
+
+    #[test]
+    fn pagination_params_offset_calculation() {
+        println!("[shared] pagination_params_offset_calculation");
+        let p = PaginationParams { page: Some(3), per_page: Some(10) };
+        assert_eq!(p.page(),     3,  "page=3");
+        assert_eq!(p.per_page(), 10, "per_page=10");
+        assert_eq!(p.offset(),   20, "offset for page 3 with per_page 10 is 20");
+        println!("[shared] pagination_params_offset_calculation: PASS");
+    }
+
+    #[test]
+    fn pagination_params_clamps_per_page() {
+        println!("[shared] pagination_params_clamps_per_page");
+        let too_large = PaginationParams { page: Some(1), per_page: Some(500) };
+        assert_eq!(too_large.per_page(), 100, "per_page clamped to max 100");
+
+        let zero = PaginationParams { page: Some(1), per_page: Some(0) };
+        assert_eq!(zero.per_page(), 1, "per_page clamped to min 1");
+        println!("[shared] pagination_params_clamps_per_page: PASS");
+    }
+
+    #[test]
+    fn pagination_params_page_min_is_one() {
+        println!("[shared] pagination_params_page_min_is_one");
+        let negative = PaginationParams { page: Some(-5), per_page: None };
+        assert_eq!(negative.page(), 1, "negative page clamped to 1");
+        println!("[shared] pagination_params_page_min_is_one: PASS");
+    }
+
+    // ── mask_phone ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn mask_phone_formats_last_four() {
+        println!("[shared] mask_phone_formats_last_four");
+        assert_eq!(mask_phone("1234"), "(XXX) XXX-1234");
+        assert_eq!(mask_phone("9999"), "(XXX) XXX-9999");
+        assert_eq!(mask_phone("0000"), "(XXX) XXX-0000");
+        println!("[shared] mask_phone_formats_last_four: PASS");
+    }
+
+    // ── Rules constants ───────────────────────────────────────────────────────
+
+    #[test]
+    fn rules_constants_sanity() {
+        println!("[shared] rules_constants_sanity");
+        use rules::*;
+        // These constants drive the business rules engine; verify they're sane.
+        assert!(FULL_REFUND_HOURS > PARTIAL_REFUND_HOURS,
+            "full-refund window must be wider than partial window");
+        assert!(PARTIAL_REFUND_PCT <= 100,
+            "partial refund % must not exceed 100");
+        assert!(QUALITY_PUBLISH_THRESHOLD <= 100,
+            "quality threshold must be a valid percentage");
+        assert!(SIMILARITY_QUARANTINE > 0.0 && SIMILARITY_QUARANTINE <= 1.0,
+            "similarity threshold must be in (0, 1]");
+        assert!(MIN_PASSWORD_LEN >= 8,
+            "minimum password length must be at least 8");
+        assert!(MAX_FAILED_LOGINS >= 3,
+            "lockout threshold must allow at least 3 attempts");
+        println!("[shared] rules_constants_sanity: PASS");
+    }
+}

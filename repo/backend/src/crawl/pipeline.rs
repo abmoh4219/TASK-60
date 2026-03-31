@@ -239,47 +239,73 @@ mod tests {
 
     #[test]
     fn strip_html_removes_tags() {
+        println!("[pipeline] strip_html_removes_tags");
         let result = strip_html("<p>Hello <b>world</b></p>");
         assert!(result.contains("Hello"));
         assert!(result.contains("world"));
         assert!(!result.contains('<'));
+        println!("[pipeline] strip_html_removes_tags: PASS");
     }
 
     #[test]
     fn normalize_collapses_whitespace() {
+        println!("[pipeline] normalize_collapses_whitespace");
         assert_eq!(normalize_whitespace("a  b\t\nc"), "a b c");
+        println!("[pipeline] normalize_collapses_whitespace: PASS");
     }
 
     #[test]
     fn slugify_produces_clean_slug() {
+        println!("[pipeline] slugify_produces_clean_slug");
         assert_eq!(slugify("Train Delays: Update #3!"), "train-delays-update-3");
+        assert_eq!(slugify("  --leading-hyphens--  "), "leading-hyphens");
+        assert_eq!(slugify("UPPER CASE"), "upper-case");
+        println!("[pipeline] slugify_produces_clean_slug: PASS");
+    }
+
+    #[test]
+    fn slugify_truncates_long_input() {
+        println!("[pipeline] slugify_truncates_long_input");
+        let long = "word ".repeat(30);
+        let slug = slugify(&long);
+        assert!(slug.len() <= 120, "slug must not exceed 120 chars");
+        assert!(!slug.ends_with('-'), "slug must not end with hyphen");
+        println!("[pipeline] slugify_truncates_long_input: {} chars — PASS", slug.len());
     }
 
     #[test]
     fn fingerprint_is_deterministic() {
+        println!("[pipeline] fingerprint_is_deterministic");
         let a = content_fingerprint("Hello", "World", Some("https://x.com"));
         let b = content_fingerprint("Hello", "World", Some("https://x.com"));
         assert_eq!(a, b);
+        assert_eq!(a.len(), 64, "SHA-256 hex must be 64 chars");
+        println!("[pipeline] fingerprint_is_deterministic: PASS");
     }
 
     #[test]
     fn fingerprint_differs_on_content_change() {
+        println!("[pipeline] fingerprint_differs_on_content_change");
         let a = content_fingerprint("Hello", "World", None);
         let b = content_fingerprint("Hello", "World2", None);
         assert_ne!(a, b);
+        println!("[pipeline] fingerprint_differs_on_content_change: PASS");
     }
 
     #[test]
     fn transform_rejects_empty_item() {
+        println!("[pipeline] transform_rejects_empty_item");
         let raw = RawItem {
             title: None, body: None, category: None, tags: None,
             publish_date: None, source_url: None, author: None, image_url: None,
         };
         assert!(transform(&raw).is_none());
+        println!("[pipeline] transform_rejects_empty_item: PASS");
     }
 
     #[test]
     fn transform_sets_default_category() {
+        println!("[pipeline] transform_sets_default_category");
         let raw = RawItem {
             title: Some("Test".into()), body: Some("Body content here for test.".into()),
             category: Some("unknown_type".into()), tags: None,
@@ -287,5 +313,39 @@ mod tests {
         };
         let item = transform(&raw).unwrap();
         assert_eq!(item.category, "general");
+        println!("[pipeline] transform_sets_default_category: PASS");
+    }
+
+    #[test]
+    fn transform_accepts_known_category() {
+        println!("[pipeline] transform_accepts_known_category");
+        let raw = RawItem {
+            title: Some("Fare Update".into()),
+            body:  Some("New fares for all routes.".into()),
+            category: Some("Fares".into()), // mixed-case — should lowercase
+            tags: Some(vec!["pricing".into()]),
+            publish_date: Some("2024-01-15".into()),
+            source_url: Some("https://example.com".into()),
+            author: None, image_url: None,
+        };
+        let item = transform(&raw).unwrap();
+        assert_eq!(item.category, "fares");
+        assert_eq!(item.tags, vec!["pricing"]);
+        assert!(item.publish_date.is_some());
+        assert!(!item.fingerprint.is_empty());
+        assert!(!item.slug.is_empty());
+        println!("[pipeline] transform_accepts_known_category: PASS");
+    }
+
+    #[test]
+    fn expand_abbreviations_works() {
+        println!("[pipeline] expand_abbreviations_works");
+        let input = "arr. at London stn. approx. 10 min. late";
+        let expanded = expand_abbreviations(input);
+        assert!(expanded.contains("arrival"), "arr. should expand");
+        assert!(expanded.contains("station"), "stn. should expand");
+        assert!(expanded.contains("approximately"), "approx. should expand");
+        assert!(expanded.contains("minutes"), "min. should expand");
+        println!("[pipeline] expand_abbreviations_works: PASS");
     }
 }

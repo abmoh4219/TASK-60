@@ -17,6 +17,10 @@ use crate::api::ops::{
 };
 use crate::app::Route;
 use crate::auth::AuthContext;
+use crate::components::{
+    empty_state, icons, input_cls, select_cls, skeleton_rows, status_badge,
+    btn_primary, btn_secondary,
+};
 
 use super::OpsLayout;
 
@@ -27,7 +31,6 @@ pub fn ops_schedules_page() -> Html {
     let auth  = use_context::<AuthContext>().expect("AuthContext missing");
     let token = auth.token.clone().unwrap_or_default();
     let user  = auth.current_user().unwrap();
-    // Admin and OpsAgent can mutate schedules / inventory.
     let can_manage = matches!(user.role, UserRole::Admin | UserRole::OpsAgent);
 
     // ── Filters ───────────────────────────────────────────────────────────
@@ -189,12 +192,14 @@ pub fn ops_schedules_page() -> Html {
     // ── Render ────────────────────────────────────────────────────────────
     html! {
         <OpsLayout active={Route::OpsSchedules}>
-            <div class="space-y-4">
-                <h1 class="text-xl font-semibold text-gray-900">{"Schedules"}</h1>
+            <div class="space-y-5">
 
-                // Filter bar
-                <div class="flex flex-wrap gap-3">
-                    <select class="rounded border border-gray-300 text-sm px-3 py-1.5"
+                // ── Filter bar ────────────────────────────────────────────
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="text-slate-400 shrink-0">
+                        { icons::funnel("w-4 h-4") }
+                    </span>
+                    <select class={select_cls()}
                         onchange={{
                             let filter_route = filter_route.clone();
                             let page = page.clone();
@@ -204,10 +209,12 @@ pub fn ops_schedules_page() -> Html {
                         }}>
                         <option value="">{"All routes"}</option>
                         { for routes.iter().map(|r| html! {
-                            <option value={r.id.clone()}>{ &r.route_code }{ " — " }{ &r.name }</option>
+                            <option value={r.id.clone()}>
+                                { &r.route_code }{ " — " }{ &r.name }
+                            </option>
                         })}
                     </select>
-                    <select class="rounded border border-gray-300 text-sm px-3 py-1.5"
+                    <select class={select_cls()}
                         onchange={{
                             let filter_status = filter_status.clone();
                             let page = page.clone();
@@ -223,33 +230,61 @@ pub fn ops_schedules_page() -> Html {
                     </select>
                 </div>
 
-                <div class="flex gap-4 items-start">
+                <div class="flex gap-5 items-start">
+
                     // ── Table ─────────────────────────────────────────────
-                    <div class="flex-1 min-w-0">
+                    <div class="flex-1 min-w-0 space-y-4">
                         if *loading {
-                            <p class="text-sm text-gray-400 animate-pulse">{"Loading…"}</p>
+                            <div class="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+                                <table class="min-w-full">
+                                    <thead class="bg-slate-50 border-b border-slate-200/60">
+                                        <tr>
+                                            { for ["Train","Route","Departure","Status","Platform"].iter().map(|h| html! {
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                                    { *h }
+                                                </th>
+                                            }) }
+                                        </tr>
+                                    </thead>
+                                    <tbody>{ skeleton_rows(8) }</tbody>
+                                </table>
+                            </div>
                         } else if let Some(p) = &*schedules {
                             if p.items.is_empty() {
-                                <p class="text-sm text-gray-500">{"No schedules found."}</p>
+                                { empty_state(
+                                    icons::calendar("w-10 h-10"),
+                                    "No schedules found",
+                                    "Try adjusting the route or status filter.",
+                                ) }
                             } else {
-                                <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                                <div class="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
                                     <table class="min-w-full text-sm">
-                                        <thead class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                                        <thead class="bg-slate-50 border-b border-slate-200/60">
                                             <tr>
-                                                <th class="px-4 py-3 text-left">{"Train"}</th>
-                                                <th class="px-4 py-3 text-left">{"Route"}</th>
-                                                <th class="px-4 py-3 text-left">{"Departure"}</th>
-                                                <th class="px-4 py-3 text-left">{"Status"}</th>
-                                                <th class="px-4 py-3 text-left">{"Platform"}</th>
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                                    {"Train"}
+                                                </th>
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                                    {"Route"}
+                                                </th>
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                                    {"Departure"}
+                                                </th>
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                                    {"Status"}
+                                                </th>
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                                                    {"Platform"}
+                                                </th>
                                             </tr>
                                         </thead>
-                                        <tbody class="divide-y divide-gray-100">
+                                        <tbody class="divide-y divide-slate-100">
                                         { for p.items.iter().map(|s| {
                                             let is_sel = selected_id.as_deref() == Some(&s.id);
                                             let row_cls = if is_sel {
-                                                "bg-blue-50 cursor-pointer hover:bg-blue-100 transition"
+                                                "bg-indigo-50 cursor-pointer border-l-2 border-l-indigo-500 transition-colors"
                                             } else {
-                                                "cursor-pointer hover:bg-gray-50 transition"
+                                                "cursor-pointer hover:bg-slate-50/60 transition-colors"
                                             };
                                             let id          = s.id.clone();
                                             let selected_id = selected_id.clone();
@@ -260,15 +295,19 @@ pub fn ops_schedules_page() -> Html {
                                                         selected_id.set(Some(id.clone()));
                                                         action_ok.set(false);
                                                     })}>
-                                                    <td class="px-4 py-3 font-mono text-gray-800">{ &s.train_number }</td>
-                                                    <td class="px-4 py-3 text-gray-700">{ &s.route_code }</td>
-                                                    <td class="px-4 py-3 text-gray-700">{ s.fmt_departure() }</td>
-                                                    <td class="px-4 py-3">
-                                                        <span class={format!("text-xs font-medium px-2 py-0.5 rounded {}", s.status_color())}>
-                                                            { &s.status }
-                                                        </span>
+                                                    <td class="px-4 py-3.5 font-mono text-sm font-medium text-slate-800">
+                                                        { &s.train_number }
                                                     </td>
-                                                    <td class="px-4 py-3 text-gray-500">
+                                                    <td class="px-4 py-3.5 text-sm text-slate-600">
+                                                        { &s.route_code }
+                                                    </td>
+                                                    <td class="px-4 py-3.5 text-sm text-slate-600">
+                                                        { s.fmt_departure() }
+                                                    </td>
+                                                    <td class="px-4 py-3.5">
+                                                        { status_badge(&s.status) }
+                                                    </td>
+                                                    <td class="px-4 py-3.5 text-sm text-slate-400">
                                                         { s.platform.as_deref().unwrap_or("—") }
                                                     </td>
                                                 </tr>
@@ -278,20 +317,22 @@ pub fn ops_schedules_page() -> Html {
                                     </table>
                                 </div>
                                 if p.total_pages > 1 {
-                                    <div class="mt-3 flex items-center gap-2 text-sm">
+                                    <div class="flex items-center gap-3">
                                         if *page > 1 {
-                                            <button class="px-3 py-1 rounded border border-gray-300 hover:bg-gray-100"
+                                            <button class={btn_secondary()}
                                                 onclick={{ let page = page.clone(); Callback::from(move |_| page.set(*page - 1)) }}>
-                                                {"← Prev"}
+                                                { icons::chevron_left("w-4 h-4") }
+                                                {"Prev"}
                                             </button>
                                         }
-                                        <span class="text-gray-500">
+                                        <span class="text-sm text-slate-500">
                                             { format!("Page {} of {}", *page, p.total_pages) }
                                         </span>
                                         if *page < p.total_pages {
-                                            <button class="px-3 py-1 rounded border border-gray-300 hover:bg-gray-100"
+                                            <button class={btn_secondary()}
                                                 onclick={{ let page = page.clone(); Callback::from(move |_| page.set(*page + 1)) }}>
-                                                {"Next →"}
+                                                {"Next"}
+                                                { icons::chevron_right("w-4 h-4") }
                                             </button>
                                         }
                                     </div>
@@ -302,122 +343,170 @@ pub fn ops_schedules_page() -> Html {
 
                     // ── Detail panel ──────────────────────────────────────
                     if selected_id.is_some() {
-                        <div class="w-80 shrink-0 bg-white rounded-lg border border-gray-200 p-4 space-y-3 self-start">
+                        <div class="w-80 shrink-0 bg-white rounded-xl border border-slate-200/80 shadow-card self-start overflow-hidden">
                             if *detail_loading {
-                                <p class="text-sm text-gray-400 animate-pulse">{"Loading…"}</p>
+                                <div class="p-5 space-y-3">
+                                    <div class="skeleton h-5 w-32"></div>
+                                    <div class="skeleton h-4 w-48"></div>
+                                    <div class="skeleton h-4 w-40"></div>
+                                </div>
                             } else if let Some(d) = &*detail {
-                                <div>
-                                    <div class="flex items-center justify-between">
-                                        <span class="font-semibold font-mono text-gray-900">{ &d.schedule.train_number }</span>
-                                        <span class={format!("text-xs px-2 py-0.5 rounded font-medium {}", d.schedule.status_color())}>
-                                            { &d.schedule.status }
-                                        </span>
-                                    </div>
-                                    <p class="text-sm text-gray-600 mt-0.5">{ d.schedule.route_label() }</p>
-                                    <p class="text-xs text-gray-500 mt-0.5">
-                                        { d.schedule.fmt_departure() }{ " → " }{ d.schedule.fmt_arrival() }
-                                    </p>
-                                    if d.schedule.delay_minutes > 0 {
-                                        <p class="text-xs text-amber-600 mt-0.5">
-                                            { format!("Delayed {} min", d.schedule.delay_minutes) }
+                                // Header
+                                <div class="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
+                                    <div class="min-w-0">
+                                        <p class="font-mono font-semibold text-slate-900">
+                                            { &d.schedule.train_number }
                                         </p>
-                                    }
+                                        <p class="text-xs text-slate-500 mt-0.5">
+                                            { d.schedule.route_label() }
+                                        </p>
+                                        <p class="text-xs text-slate-400 mt-0.5">
+                                            { d.schedule.fmt_departure() }{ " → " }{ d.schedule.fmt_arrival() }
+                                        </p>
+                                        if d.schedule.delay_minutes > 0 {
+                                            <p class="text-xs text-amber-600 mt-1 font-medium">
+                                                { icons::clock("w-3.5 h-3.5 inline -mt-0.5 mr-0.5") }
+                                                { format!("Delayed {} min", d.schedule.delay_minutes) }
+                                            </p>
+                                        }
+                                    </div>
+                                    { status_badge(&d.schedule.status) }
                                 </div>
 
-                                // Inventory table
+                                // Inventory
                                 if !d.inventory.is_empty() {
-                                    <div>
-                                        <p class="text-xs font-semibold text-gray-500 uppercase mb-1">{"Inventory"}</p>
+                                    <div class="px-5 py-3 border-b border-slate-100">
+                                        <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-2">
+                                            {"Inventory"}
+                                        </p>
+                                        <div class="space-y-1.5">
                                         { for d.inventory.iter().map(|inv| html! {
-                                            <div class="flex justify-between text-xs py-1 border-b border-gray-50 last:border-0">
-                                                <span class="text-gray-700 font-medium">{ &inv.seat_class_code }</span>
-                                                <span class="text-gray-500">
-                                                    { format!("{} avail / {} total ({}%)", inv.available_seats, inv.total_seats, inv.occupancy_pct()) }
+                                            <div class="flex items-center justify-between text-xs">
+                                                <span class="font-medium text-slate-700">
+                                                    { &inv.seat_class_code }
                                                 </span>
+                                                <div class="flex items-center gap-2">
+                                                    <div class="w-24 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                                                        <div
+                                                            class="h-full rounded-full bg-indigo-500"
+                                                            style={format!("width: {}%", 100 - inv.occupancy_pct())}
+                                                        ></div>
+                                                    </div>
+                                                    <span class="text-slate-500 tabular-nums">
+                                                        { format!("{}/{}", inv.available_seats, inv.total_seats) }
+                                                    </span>
+                                                </div>
                                             </div>
                                         })}
+                                        </div>
                                     </div>
                                 }
 
+                                // Success banner
                                 if *action_ok {
-                                    <p class="text-xs text-green-700 font-medium bg-green-50 rounded px-2 py-1">{"✓ Updated successfully"}</p>
+                                    <div class="mx-5 my-3 flex items-center gap-2 rounded-lg bg-emerald-50
+                                                border border-emerald-200 px-3 py-2 text-xs text-emerald-700">
+                                        { icons::check_circle("w-4 h-4 text-emerald-500 shrink-0") }
+                                        {"Updated successfully"}
+                                    </div>
                                 }
 
-                                if can_manage {
-                                    if *action == 0 {
-                                        <div class="flex gap-2 pt-1">
-                                            <button class="flex-1 rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 transition"
-                                                onclick={{ let action = action.clone(); let action_ok = action_ok.clone(); Callback::from(move |_| { action.set(1); action_ok.set(false); }) }}>
-                                                {"Update Status"}
-                                            </button>
-                                            <button class="flex-1 rounded bg-slate-600 px-3 py-1.5 text-xs text-white hover:bg-slate-700 transition"
-                                                onclick={{ let action = action.clone(); let action_ok = action_ok.clone(); Callback::from(move |_| { action.set(2); action_ok.set(false); }) }}>
-                                                {"Fix Inventory"}
-                                            </button>
-                                        </div>
-                                    }
-
-                                    // ── Status update form ────────────────
-                                    if *action == 1 {
-                                        <form class="space-y-2 pt-1" onsubmit={on_update_status.clone()}>
-                                            <p class="text-xs font-semibold text-gray-600">{"Update Status"}</p>
-                                            <select class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                                                onchange={{ let s = st_status.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }}>
-                                                <option value="">{"— select status —"}</option>
-                                                <option value="scheduled">{"Scheduled"}</option>
-                                                <option value="delayed">{"Delayed"}</option>
-                                                <option value="cancelled">{"Cancelled"}</option>
-                                                <option value="completed">{"Completed"}</option>
-                                            </select>
-                                            <input type="number" placeholder="Delay minutes (optional)"
-                                                class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                                                onchange={{ let s = st_delay.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
-                                            <input type="text" placeholder="Platform (optional)"
-                                                class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                                                onchange={{ let s = st_platform.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
-                                            { err_html(&action_err) }
+                                // Actions
+                                <div class="px-5 py-4 space-y-3">
+                                    if can_manage {
+                                        if *action == 0 {
                                             <div class="flex gap-2">
-                                                <button type="submit" class="flex-1 rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700">{"Save"}</button>
-                                                <button type="button" class="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50"
-                                                    onclick={{ let action = action.clone(); let e = action_err.clone(); Callback::from(move |_| { action.set(0); e.set(None); }) }}>{"Cancel"}</button>
+                                                <button
+                                                    class={btn_primary()}
+                                                    onclick={{ let action = action.clone(); let aok = action_ok.clone();
+                                                        Callback::from(move |_| { action.set(1); aok.set(false); }) }}>
+                                                    { icons::arrow_path("w-4 h-4") }
+                                                    {"Update Status"}
+                                                </button>
+                                                <button
+                                                    class={crate::components::btn_secondary()}
+                                                    onclick={{ let action = action.clone(); let aok = action_ok.clone();
+                                                        Callback::from(move |_| { action.set(2); aok.set(false); }) }}>
+                                                    {"Fix Inventory"}
+                                                </button>
                                             </div>
-                                        </form>
+                                        }
+
+                                        // Status update form
+                                        if *action == 1 {
+                                            <form class="space-y-3" onsubmit={on_update_status.clone()}>
+                                                <p class="text-xs font-semibold text-slate-600">
+                                                    {"Update Schedule Status"}
+                                                </p>
+                                                <select class={input_cls()}
+                                                    onchange={{ let s = st_status.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }}>
+                                                    <option value="">{"— select status —"}</option>
+                                                    <option value="scheduled">{"Scheduled"}</option>
+                                                    <option value="delayed">{"Delayed"}</option>
+                                                    <option value="cancelled">{"Cancelled"}</option>
+                                                    <option value="completed">{"Completed"}</option>
+                                                </select>
+                                                <input type="number" placeholder="Delay minutes (optional)"
+                                                    class={input_cls()}
+                                                    onchange={{ let s = st_delay.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
+                                                <input type="text" placeholder="Platform (optional)"
+                                                    class={input_cls()}
+                                                    onchange={{ let s = st_platform.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
+                                                { err_html(&action_err) }
+                                                <div class="flex gap-2">
+                                                    <button type="submit" class={btn_primary()}>{"Save"}</button>
+                                                    <button type="button" class={btn_secondary()}
+                                                        onclick={{ let action = action.clone(); let e = action_err.clone();
+                                                            Callback::from(move |_| { action.set(0); e.set(None); }) }}>
+                                                        {"Cancel"}
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        }
+
+                                        // Inventory correction form
+                                        if *action == 2 {
+                                            <form class="space-y-3" onsubmit={on_correct_inv.clone()}>
+                                                <p class="text-xs font-semibold text-slate-600">
+                                                    {"Correct Inventory"}
+                                                </p>
+                                                <select class={input_cls()}
+                                                    onchange={{ let s = inv_class.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }}>
+                                                    <option value="">{"— seat class —"}</option>
+                                                    { for d.inventory.iter().map(|inv| html! {
+                                                        <option value={inv.seat_class_id.clone()}>
+                                                            { &inv.seat_class_code }{ " (" }{ inv.seat_class_name.as_str() }{ ")" }
+                                                        </option>
+                                                    })}
+                                                </select>
+                                                <input type="number" placeholder="Total seats"
+                                                    class={input_cls()}
+                                                    onchange={{ let s = inv_total.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
+                                                <input type="number" placeholder="Available seats"
+                                                    class={input_cls()}
+                                                    onchange={{ let s = inv_avail.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
+                                                { err_html(&action_err) }
+                                                <div class="flex gap-2">
+                                                    <button type="submit" class={btn_primary()}>{"Apply"}</button>
+                                                    <button type="button" class={btn_secondary()}
+                                                        onclick={{ let action = action.clone(); let e = action_err.clone();
+                                                            Callback::from(move |_| { action.set(0); e.set(None); }) }}>
+                                                        {"Cancel"}
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        }
                                     }
 
-                                    // ── Inventory correction form ─────────
-                                    if *action == 2 {
-                                        <form class="space-y-2 pt-1" onsubmit={on_correct_inv.clone()}>
-                                            <p class="text-xs font-semibold text-gray-600">{"Correct Inventory"}</p>
-                                            <select class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                                                onchange={{ let s = inv_class.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }}>
-                                                <option value="">{"— seat class —"}</option>
-                                                { for d.inventory.iter().map(|inv| html! {
-                                                    <option value={inv.seat_class_id.clone()}>
-                                                        { &inv.seat_class_code }{ " (" }{ inv.seat_class_name.as_str() }{ ")" }
-                                                    </option>
-                                                })}
-                                            </select>
-                                            <input type="number" placeholder="Total seats"
-                                                class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                                                onchange={{ let s = inv_total.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
-                                            <input type="number" placeholder="Available seats"
-                                                class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                                                onchange={{ let s = inv_avail.clone(); Callback::from(move |e: Event| s.set(ev_val(&e))) }} />
-                                            { err_html(&action_err) }
-                                            <div class="flex gap-2">
-                                                <button type="submit" class="flex-1 rounded bg-slate-700 px-3 py-1.5 text-xs text-white hover:bg-slate-800">{"Apply"}</button>
-                                                <button type="button" class="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50"
-                                                    onclick={{ let action = action.clone(); let e = action_err.clone(); Callback::from(move |_| { action.set(0); e.set(None); }) }}>{"Cancel"}</button>
-                                            </div>
-                                        </form>
-                                    }
-                                }
-
-                                // Close
-                                <button class="w-full text-xs text-gray-400 hover:text-gray-600 text-center pt-1"
-                                    onclick={{ let s = selected_id.clone(); Callback::from(move |_| s.set(None)) }}>
-                                    {"✕ Close"}
-                                </button>
+                                    // Close
+                                    <button
+                                        class="w-full flex items-center justify-center gap-1.5 text-xs
+                                               text-slate-400 hover:text-slate-600 transition-colors py-1"
+                                        onclick={{ let s = selected_id.clone(); Callback::from(move |_| s.set(None)) }}>
+                                        { icons::x_mark("w-3.5 h-3.5") }
+                                        {"Close panel"}
+                                    </button>
+                                </div>
                             }
                         </div>
                     }
@@ -429,7 +518,6 @@ pub fn ops_schedules_page() -> Html {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Extract the current value from an input or select change event.
 fn ev_val(e: &Event) -> String {
     let target = match e.target() { Some(t) => t, None => return String::new() };
     if let Some(el) = target.dyn_ref::<HtmlInputElement>() {
@@ -448,7 +536,12 @@ fn non_empty(s: &UseStateHandle<String>) -> Option<String> {
 
 fn err_html(err: &UseStateHandle<Option<String>>) -> Html {
     match err.as_ref() {
-        Some(msg) => html! { <p class="text-xs text-red-600">{ msg }</p> },
-        None      => html! {},
+        Some(msg) => html! {
+            <div class="flex items-center gap-1.5 text-xs text-red-600">
+                { icons::exclamation_triangle("w-3.5 h-3.5 shrink-0") }
+                { msg }
+            </div>
+        },
+        None => html! {},
     }
 }

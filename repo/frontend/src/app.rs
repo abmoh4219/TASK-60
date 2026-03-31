@@ -15,7 +15,8 @@ use crate::{
     auth::{AuthAction, AuthContext, AuthState, AuthStatus},
     pages::{
         KioskArchivePage, KioskArticlePage, KioskHomePage, KioskSearchPage,
-        LoginPage, OpsOrdersPage, OpsRulesPage, OpsSchedulesPage,
+        LoginPage, OpsCredentialsPage, OpsOrdersPage, OpsRulesPage,
+        OpsSchedulesPage, OpsStaffingPage,
     },
 };
 
@@ -46,6 +47,10 @@ pub enum Route {
     OpsOrders,
     #[at("/ops/rules")]
     OpsRules,
+    #[at("/ops/staffing")]
+    OpsStaffing,
+    #[at("/ops/credentials")]
+    OpsCredentials,
 
     #[not_found]
     #[at("/404")]
@@ -102,6 +107,8 @@ fn switch(route: Route) -> Html {
         Route::OpsSchedules => html! { <OpsSchedulesPage /> },
         Route::OpsOrders    => html! { <OpsOrdersPage /> },
         Route::OpsRules     => html! { <OpsRulesPage /> },
+        Route::OpsStaffing    => html! { <OpsStaffingPage /> },
+        Route::OpsCredentials => html! { <OpsCredentialsPage /> },
 
         Route::NotFound => html! {
             <div class="flex items-center justify-center min-h-screen">

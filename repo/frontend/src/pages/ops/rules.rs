@@ -13,6 +13,7 @@ use yew::prelude::*;
 use crate::api::rules::{self as rules_api, BusinessRule, UpdateRuleBody};
 use crate::app::Route;
 use crate::auth::AuthContext;
+use crate::components::{icons, skeleton_rows, btn_primary, btn_secondary, input_cls};
 
 use super::OpsLayout;
 
@@ -63,7 +64,6 @@ pub fn ops_rules_page() -> Html {
             spawn_local(async move {
                 match rules_api::update_rule(&token, &key, &body).await {
                     Ok(updated) => {
-                        // Replace the matching rule in the list.
                         rules.set(
                             (*rules).iter().map(|r| {
                                 if r.rule_key == updated.rule_key { updated.clone() } else { r.clone() }
@@ -86,24 +86,37 @@ pub fn ops_rules_page() -> Html {
     html! {
         <OpsLayout active={Route::OpsRules}>
             <div class="space-y-6 max-w-4xl">
+                // Page header
                 <div class="flex items-center justify-between">
-                    <h1 class="text-xl font-semibold text-gray-900">{"Business Rules"}</h1>
-                    <p class="text-sm text-gray-500">
-                        {"Changes take effect immediately — no restart required."}
-                    </p>
+                    <div>
+                        <h1 class="text-lg font-semibold text-slate-900">{"Business Rules"}</h1>
+                        <p class="text-sm text-slate-500 mt-0.5">
+                            {"Changes take effect immediately — no restart required."}
+                        </p>
+                    </div>
+                    <span class="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 border
+                                 border-indigo-200 px-3 py-1 text-xs font-medium text-indigo-700">
+                        { icons::shield_check("w-3.5 h-3.5") }
+                        {"Admin only"}
+                    </span>
                 </div>
 
                 if *loading {
-                    <p class="text-sm text-gray-400 animate-pulse">{"Loading rules…"}</p>
+                    <div class="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+                        <table class="min-w-full">
+                            <tbody>{ skeleton_rows(8) }</tbody>
+                        </table>
+                    </div>
                 } else {
                     { for grouped.iter().map(|(category, rules)| {
                         let category = *category;
                         html! {
                             <div class="space-y-2">
-                                <h2 class="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                                <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-wide px-1">
                                     { category }
                                 </h2>
-                                <div class="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+                                <div class="bg-white rounded-xl border border-slate-200/80 shadow-card
+                                            divide-y divide-slate-100 overflow-hidden">
                                 { for rules.iter().map(|rule| {
                                     let key        = rule.rule_key.clone();
                                     let is_editing = editing_key.as_deref() == Some(&rule.rule_key);
@@ -132,18 +145,21 @@ pub fn ops_rules_page() -> Html {
                                         })
                                     };
                                     html! {
-                                        <div class="px-4 py-3 flex items-start gap-4">
+                                        <div class="px-5 py-3.5 flex items-start gap-4 hover:bg-slate-50/50 transition-colors">
                                             // Key + description
                                             <div class="flex-1 min-w-0">
-                                                <p class="text-sm font-mono text-gray-800">
+                                                <p class="text-sm font-mono text-slate-700 font-medium">
                                                     { &rule.rule_key }
                                                 </p>
                                                 if let Some(desc) = &rule.description {
-                                                    <p class="text-xs text-gray-500 mt-0.5">{ desc }</p>
+                                                    <p class="text-xs text-slate-500 mt-0.5">{ desc }</p>
                                                 }
                                                 if let Some(msg) = save_err.as_ref() {
                                                     if is_editing {
-                                                        <p class="text-xs text-red-600 mt-1">{ msg }</p>
+                                                        <div class="flex items-center gap-1 text-xs text-red-600 mt-1">
+                                                            { icons::exclamation_triangle("w-3 h-3 shrink-0") }
+                                                            { msg }
+                                                        </div>
                                                     }
                                                 }
                                             </div>
@@ -152,8 +168,11 @@ pub fn ops_rules_page() -> Html {
                                                 if is_editing {
                                                     <input
                                                         type="text"
-                                                        class="rounded border border-blue-400 text-sm px-2 py-1 w-36
-                                                               focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                                        class={format!("rounded-lg border border-indigo-300 text-sm \
+                                                                        px-3 py-1.5 w-40 font-mono \
+                                                                        focus:outline-none focus:ring-2 \
+                                                                        focus:ring-indigo-500/30 focus:border-indigo-500 \
+                                                                        {}", input_cls())}
                                                         value={(*edit_value).clone()}
                                                         onchange={{
                                                             let edit_value = edit_value.clone();
@@ -165,7 +184,6 @@ pub fn ops_rules_page() -> Html {
                                                                 }
                                                             })
                                                         }}
-                                                        // Enter = save, Escape = discard.
                                                         onkeydown={{
                                                             let on_save     = on_save.clone();
                                                             let key         = key.clone();
@@ -184,27 +202,34 @@ pub fn ops_rules_page() -> Html {
                                                         }}
                                                     />
                                                     <button
-                                                        class="text-xs rounded bg-blue-600 px-2.5 py-1 text-white hover:bg-blue-700"
-                                                        onclick={{ let on_save = on_save.clone(); let key = key.clone(); Callback::from(move |_| on_save.emit(key.clone())) }}>
+                                                        class={btn_primary()}
+                                                        onclick={{ let on_save = on_save.clone(); let key = key.clone();
+                                                            Callback::from(move |_| on_save.emit(key.clone())) }}>
+                                                        { icons::check_circle("w-4 h-4") }
                                                         {"Save"}
                                                     </button>
                                                     <button
-                                                        class="text-xs rounded border border-gray-300 px-2.5 py-1 hover:bg-gray-50"
+                                                        class={btn_secondary()}
                                                         onclick={on_cancel}>
                                                         {"Cancel"}
                                                     </button>
                                                 } else {
-                                                    <span class={if just_saved {
-                                                        "text-sm font-mono text-green-700 font-semibold"
-                                                    } else {
-                                                        "text-sm font-mono text-gray-700"
-                                                    }}>
+                                                    <code class={format!("text-sm font-mono {} font-medium",
+                                                        if just_saved { "text-emerald-700" } else { "text-slate-700" }
+                                                    )}>
                                                         { &rule.rule_value }
-                                                        if just_saved { {" ✓"} }
-                                                    </span>
+                                                        if just_saved {
+                                                            <span class="ml-1 text-emerald-500 text-xs">
+                                                                { icons::check_circle("w-3.5 h-3.5 inline") }
+                                                            </span>
+                                                        }
+                                                    </code>
                                                     <button
-                                                        class="text-xs text-blue-600 hover:underline"
+                                                        class="inline-flex items-center gap-1 text-xs font-medium
+                                                               text-slate-400 hover:text-indigo-600 transition-colors
+                                                               px-2 py-1 rounded hover:bg-indigo-50"
                                                         onclick={on_edit}>
+                                                        { icons::pencil("w-3 h-3") }
                                                         {"Edit"}
                                                     </button>
                                                 }
@@ -224,9 +249,7 @@ pub fn ops_rules_page() -> Html {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/// Group rules by category label, preserving alphabetical key order within each group.
 fn group_by_category(rules: &[BusinessRule]) -> Vec<(&'static str, Vec<&BusinessRule>)> {
-    // Stable ordered category list.
     let order: &[&str] = &[
         "Orders & Refunds",
         "Security & Sessions",

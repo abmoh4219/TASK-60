@@ -19,6 +19,10 @@ use crate::api::ops::{
 };
 use crate::app::Route;
 use crate::auth::AuthContext;
+use crate::components::{
+    empty_state, icons, input_cls, select_cls, skeleton_rows, status_badge,
+    btn_primary, btn_secondary, btn_danger,
+};
 
 use super::OpsLayout;
 
@@ -30,7 +34,6 @@ pub fn ops_orders_page() -> Html {
     let token = auth.token.clone().unwrap_or_default();
     let user  = auth.current_user().unwrap();
 
-    // Role gates
     let can_manage_orders  = matches!(user.role, UserRole::Admin | UserRole::OpsAgent | UserRole::CsAgent);
     let can_process_refund = matches!(user.role, UserRole::Admin | UserRole::OpsAgent | UserRole::CsAgent);
     let can_override_fee   = matches!(user.role, UserRole::Admin | UserRole::OpsAgent);
@@ -50,7 +53,7 @@ pub fn ops_orders_page() -> Html {
     let pax_page     = use_state(|| 1i64);
     let passengers   = use_state(|| None::<Page<PassengerItem>>);
     let pax_loading  = use_state(|| false);
-    let pax_purge_ok = use_state(|| None::<String>); // id that was just purged
+    let pax_purge_ok = use_state(|| None::<String>);
 
     // ── Order detail ──────────────────────────────────────────────────────
     let selected_order_id = use_state(|| None::<String>);
@@ -78,7 +81,6 @@ pub fn ops_orders_page() -> Html {
             if tab != 0 { return || (); }
             loading.set(true);
             spawn_local(async move {
-                // If search looks like an order number (e.g. "RO-12345"), use by-number lookup.
                 let result = if !search.is_empty() && search.starts_with("RO") {
                     ops_api::find_order_by_number(&token, &search).await
                         .map(|o| Page { items: vec![o], total: 1, page: 1, per_page: 20, total_pages: 1 })
@@ -161,7 +163,7 @@ pub fn ops_orders_page() -> Html {
                 let result: Result<(), _> = match kind {
                     1 => ops_api::confirm_order(&token, &id).await,
                     2 => ops_api::cancel_order(&token, &id, &CancelBody {
-                            reason:          reason,
+                            reason,
                             disruption_flag: disrupt,
                             refund_amount:   None,
                         }).await,
@@ -189,29 +191,34 @@ pub fn ops_orders_page() -> Html {
     // ── Render ────────────────────────────────────────────────────────────
     html! {
         <OpsLayout active={Route::OpsOrders}>
-            <div class="space-y-4">
-                <h1 class="text-xl font-semibold text-gray-900">{"Orders & Passengers"}</h1>
+            <div class="space-y-5">
 
-                // Tab bar
-                <div class="flex border-b border-gray-200">
+                // ── Tab bar ───────────────────────────────────────────────
+                <div class="flex border-b border-slate-200">
                     { tab_btn("Orders",     0, &active_tab) }
                     { tab_btn("Passengers", 1, &active_tab) }
                 </div>
 
                 // ── Orders tab ────────────────────────────────────────────
                 if *active_tab == 0 {
-                    <div class="space-y-3">
-                        // Search + status filter
+                    <div class="space-y-4">
+                        // Search + filter bar
                         <div class="flex flex-wrap gap-3">
-                            <input type="text" placeholder="Order number (RO-…) or search…"
-                                class="rounded border border-gray-300 text-sm px-3 py-1.5 w-72"
-                                value={(*order_search).clone()}
-                                oninput={{ let s = order_search.clone(); let p = order_page.clone();
-                                    Callback::from(move |e: InputEvent| {
-                                        s.set(ev_input(&e)); p.set(1);
-                                    })
-                                }} />
-                            <select class="rounded border border-gray-300 text-sm px-3 py-1.5"
+                            <div class="relative flex-1 min-w-[280px] max-w-sm">
+                                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                    { icons::magnifying_glass("w-4 h-4") }
+                                </span>
+                                <input type="text"
+                                    placeholder="Order number (RO-…) or search…"
+                                    class={format!("pl-9 {}", input_cls())}
+                                    value={(*order_search).clone()}
+                                    oninput={{ let s = order_search.clone(); let p = order_page.clone();
+                                        Callback::from(move |e: InputEvent| {
+                                            s.set(ev_input(&e)); p.set(1);
+                                        })
+                                    }} />
+                            </div>
+                            <select class={select_cls()}
                                 onchange={{ let s = order_status.clone(); let p = order_page.clone();
                                     Callback::from(move |e: Event| { s.set(ev_val(&e)); p.set(1); })
                                 }}>
@@ -225,45 +232,58 @@ pub fn ops_orders_page() -> Html {
                             </select>
                         </div>
 
-                        <div class="flex gap-4 items-start">
+                        <div class="flex gap-5 items-start">
                             // Order list
-                            <div class="flex-1 min-w-0">
+                            <div class="flex-1 min-w-0 space-y-4">
                                 if *orders_loading {
-                                    <p class="text-sm text-gray-400 animate-pulse">{"Loading…"}</p>
+                                    <div class="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+                                        <table class="min-w-full">
+                                            <tbody>{ skeleton_rows(6) }</tbody>
+                                        </table>
+                                    </div>
                                 } else if let Some(p) = &*orders {
                                     if p.items.is_empty() {
-                                        <p class="text-sm text-gray-500">{"No orders found."}</p>
+                                        { empty_state(icons::ticket("w-10 h-10"), "No orders found",
+                                            "Try a different search term or status filter.") }
                                     } else {
-                                        <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                                        <div class="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
                                             <table class="min-w-full text-sm">
-                                                <thead class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                                                <thead class="bg-slate-50 border-b border-slate-200/60">
                                                     <tr>
-                                                        <th class="px-4 py-3 text-left">{"Order #"}</th>
-                                                        <th class="px-4 py-3 text-left">{"Status"}</th>
-                                                        <th class="px-4 py-3 text-left">{"Fare"}</th>
-                                                        <th class="px-4 py-3 text-left">{"Created"}</th>
+                                                        <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"Order #"}</th>
+                                                        <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"Status"}</th>
+                                                        <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"Fare"}</th>
+                                                        <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"Created"}</th>
                                                     </tr>
                                                 </thead>
-                                                <tbody class="divide-y divide-gray-100">
+                                                <tbody class="divide-y divide-slate-100">
                                                 { for p.items.iter().map(|o| {
                                                     let is_sel = selected_order_id.as_deref() == Some(&o.id);
                                                     let cls = if is_sel {
-                                                        "bg-blue-50 cursor-pointer hover:bg-blue-100 transition"
+                                                        "bg-indigo-50 cursor-pointer border-l-2 border-l-indigo-500"
                                                     } else {
-                                                        "cursor-pointer hover:bg-gray-50 transition"
+                                                        "cursor-pointer hover:bg-slate-50/60 transition-colors"
                                                     };
                                                     let id  = o.id.clone();
                                                     let sel = selected_order_id.clone();
                                                     let aok = action_ok.clone();
                                                     html! {
                                                         <tr class={cls}
-                                                            onclick={Callback::from(move |_| { sel.set(Some(id.clone())); aok.set(false); })}>
-                                                            <td class="px-4 py-3 font-mono text-blue-700">{ &o.order_number }</td>
-                                                            <td class="px-4 py-3">
-                                                                <span class={format!("text-xs font-medium px-2 py-0.5 rounded {}", o.status_color())}>{ &o.status }</span>
+                                                            onclick={Callback::from(move |_| {
+                                                                sel.set(Some(id.clone())); aok.set(false);
+                                                            })}>
+                                                            <td class="px-4 py-3.5 font-mono text-sm font-semibold text-indigo-700">
+                                                                { &o.order_number }
                                                             </td>
-                                                            <td class="px-4 py-3 text-gray-700">{ format!("${}", &o.fare_amount) }</td>
-                                                            <td class="px-4 py-3 text-gray-500 text-xs">{ crate::api::ops::fmt_dt(&o.created_at) }</td>
+                                                            <td class="px-4 py-3.5">
+                                                                { status_badge(&o.status) }
+                                                            </td>
+                                                            <td class="px-4 py-3.5 text-sm text-slate-700 font-medium">
+                                                                { format!("${}", &o.fare_amount) }
+                                                            </td>
+                                                            <td class="px-4 py-3.5 text-xs text-slate-400 tabular-nums">
+                                                                { crate::api::ops::fmt_dt(&o.created_at) }
+                                                            </td>
                                                         </tr>
                                                     }
                                                 })}
@@ -277,15 +297,24 @@ pub fn ops_orders_page() -> Html {
 
                             // Order detail panel
                             if selected_order_id.is_some() {
-                                <div class="w-80 shrink-0 bg-white rounded-lg border border-gray-200 p-4 space-y-3 self-start">
+                                <div class="w-80 shrink-0 bg-white rounded-xl border border-slate-200/80 shadow-card self-start overflow-hidden">
                                     if *detail_loading {
-                                        <p class="text-sm text-gray-400 animate-pulse">{"Loading…"}</p>
+                                        <div class="p-5 space-y-3">
+                                            <div class="skeleton h-5 w-32"></div>
+                                            <div class="skeleton h-4 w-48"></div>
+                                            <div class="skeleton h-4 w-40"></div>
+                                        </div>
                                     } else if let Some(resp) = &*order_detail {
                                         { order_detail_html(resp, can_manage_orders, can_process_refund, can_override_fee, &action, &action_err, &action_ok, &form_reason, &form_amount, &form_disrupt, &dispatch_action) }
-                                        <button class="w-full text-xs text-gray-400 hover:text-gray-600 text-center pt-1"
-                                            onclick={{ let s = selected_order_id.clone(); Callback::from(move |_| s.set(None)) }}>
-                                            {"✕ Close"}
-                                        </button>
+                                        <div class="px-5 py-3 border-t border-slate-100">
+                                            <button
+                                                class="w-full flex items-center justify-center gap-1.5 text-xs
+                                                       text-slate-400 hover:text-slate-600 transition-colors py-1"
+                                                onclick={{ let s = selected_order_id.clone(); Callback::from(move |_| s.set(None)) }}>
+                                                { icons::x_mark("w-3.5 h-3.5") }
+                                                {"Close panel"}
+                                            </button>
+                                        </div>
                                     }
                                 </div>
                             }
@@ -295,56 +324,82 @@ pub fn ops_orders_page() -> Html {
 
                 // ── Passengers tab ────────────────────────────────────────
                 if *active_tab == 1 {
-                    <div class="space-y-3">
-                        <input type="text" placeholder="Search by name or phone last 4…"
-                            class="rounded border border-gray-300 text-sm px-3 py-1.5 w-72"
-                            value={(*pax_search).clone()}
-                            oninput={{ let s = pax_search.clone(); let p = pax_page.clone();
-                                Callback::from(move |e: InputEvent| { s.set(ev_input(&e)); p.set(1); })
-                            }} />
+                    <div class="space-y-4">
+                        <div class="relative max-w-sm">
+                            <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                                { icons::magnifying_glass("w-4 h-4") }
+                            </span>
+                            <input type="text"
+                                placeholder="Search by name or phone last 4…"
+                                class={format!("pl-9 {}", input_cls())}
+                                value={(*pax_search).clone()}
+                                oninput={{ let s = pax_search.clone(); let p = pax_page.clone();
+                                    Callback::from(move |e: InputEvent| { s.set(ev_input(&e)); p.set(1); })
+                                }} />
+                        </div>
 
                         if *pax_loading {
-                            <p class="text-sm text-gray-400 animate-pulse">{"Loading…"}</p>
+                            <div class="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
+                                <table class="min-w-full">
+                                    <tbody>{ skeleton_rows(5) }</tbody>
+                                </table>
+                            </div>
                         } else if let Some(p) = &*passengers {
                             if p.items.is_empty() {
-                                <p class="text-sm text-gray-500">{"No passengers found."}</p>
+                                { empty_state(icons::users("w-10 h-10"), "No passengers found",
+                                    "Try a different name or phone search.") }
                             } else {
-                                <div class="overflow-x-auto rounded-lg border border-gray-200 bg-white">
+                                <div class="bg-white rounded-xl border border-slate-200/80 shadow-card overflow-hidden">
                                     <table class="min-w-full text-sm">
-                                        <thead class="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
+                                        <thead class="bg-slate-50 border-b border-slate-200/60">
                                             <tr>
-                                                <th class="px-4 py-3 text-left">{"Name"}</th>
-                                                <th class="px-4 py-3 text-left">{"Phone"}</th>
-                                                <th class="px-4 py-3 text-left">{"PII Status"}</th>
-                                                if can_manage_orders { <th class="px-4 py-3 text-left">{"Actions"}</th> }
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"Name"}</th>
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"Phone"}</th>
+                                                <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"PII Status"}</th>
+                                                if can_manage_orders {
+                                                    <th class="px-4 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wide">{"Actions"}</th>
+                                                }
                                             </tr>
                                         </thead>
-                                        <tbody class="divide-y divide-gray-100">
+                                        <tbody class="divide-y divide-slate-100">
                                         { for p.items.iter().map(|pax| {
                                             let pax_id = pax.id.clone();
                                             let pax_purge_ok = pax_purge_ok.clone();
                                             let token2 = token.clone();
                                             let just_purged = pax_purge_ok.as_deref() == Some(&pax.id);
                                             html! {
-                                                <tr class="hover:bg-gray-50">
-                                                    <td class="px-4 py-3 text-gray-900">{ &pax.full_name }</td>
-                                                    <td class="px-4 py-3 font-mono text-gray-600">{ pax.masked_phone() }</td>
-                                                    <td class="px-4 py-3 text-xs">
+                                                <tr class="hover:bg-slate-50/60 transition-colors">
+                                                    <td class="px-4 py-3.5 text-sm text-slate-900 font-medium">
+                                                        { &pax.full_name }
+                                                    </td>
+                                                    <td class="px-4 py-3.5 font-mono text-sm text-slate-500">
+                                                        { pax.masked_phone() }
+                                                    </td>
+                                                    <td class="px-4 py-3.5">
                                                         if pax.is_purged() {
-                                                            <span class="text-gray-400 italic">{"Purged"}</span>
+                                                            <span class="text-xs text-slate-400 italic">{"Purged"}</span>
                                                         } else if pax.pii_purge_requested_at.is_some() {
-                                                            <span class="text-amber-600">{"Purge requested"}</span>
+                                                            <span class="inline-flex items-center gap-1 text-xs text-amber-600 font-medium">
+                                                                { icons::clock("w-3 h-3") }
+                                                                {"Purge requested"}
+                                                            </span>
                                                         } else {
-                                                            <span class="text-green-600">{"Active"}</span>
+                                                            <span class="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                                                                { icons::check_circle("w-3 h-3") }
+                                                                {"Active"}
+                                                            </span>
                                                         }
                                                     </td>
                                                     if can_manage_orders {
-                                                        <td class="px-4 py-3">
+                                                        <td class="px-4 py-3.5">
                                                             if just_purged {
-                                                                <span class="text-xs text-green-600 font-medium">{"✓ Requested"}</span>
+                                                                <span class="inline-flex items-center gap-1 text-xs text-emerald-600 font-medium">
+                                                                    { icons::check_circle("w-3.5 h-3.5") }
+                                                                    {"Requested"}
+                                                                </span>
                                                             } else if !pax.is_purged() && pax.pii_purge_requested_at.is_none() {
                                                                 <button
-                                                                    class="text-xs text-red-600 hover:underline"
+                                                                    class="text-xs font-medium text-red-600 hover:text-red-700 transition-colors"
                                                                     onclick={Callback::from(move |_| {
                                                                         let pax_id      = pax_id.clone();
                                                                         let pax_purge_ok = pax_purge_ok.clone();
@@ -380,133 +435,171 @@ pub fn ops_orders_page() -> Html {
 
 #[allow(clippy::too_many_arguments)]
 fn order_detail_html(
-    resp:               &OrderDetailResponse,
-    can_manage:         bool,
-    can_refund:         bool,
-    can_fee:            bool,
-    action:             &UseStateHandle<u8>,
-    action_err:         &UseStateHandle<Option<String>>,
-    action_ok:          &UseStateHandle<bool>,
-    form_reason:        &UseStateHandle<String>,
-    form_amount:        &UseStateHandle<String>,
-    form_disrupt:       &UseStateHandle<bool>,
-    dispatch:           &Callback<u8>,
+    resp:         &OrderDetailResponse,
+    can_manage:   bool,
+    can_refund:   bool,
+    can_fee:      bool,
+    action:       &UseStateHandle<u8>,
+    action_err:   &UseStateHandle<Option<String>>,
+    action_ok:    &UseStateHandle<bool>,
+    form_reason:  &UseStateHandle<String>,
+    form_amount:  &UseStateHandle<String>,
+    form_disrupt: &UseStateHandle<bool>,
+    dispatch:     &Callback<u8>,
 ) -> Html {
     let o = &resp.order;
     html! {
         <>
             // Header
-            <div>
-                <div class="flex items-center justify-between">
-                    <span class="font-mono font-semibold text-blue-700">{ &o.order_number }</span>
-                    <span class={format!("text-xs px-2 py-0.5 rounded font-medium {}", o.status_color())}>
-                        { &o.status }
-                    </span>
+            <div class="px-5 py-4 border-b border-slate-100">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="min-w-0">
+                        <p class="font-mono font-semibold text-indigo-700 text-sm">
+                            { &o.order_number }
+                        </p>
+                        <p class="text-sm text-slate-800 font-medium mt-0.5">{ &o.passenger_name }</p>
+                        <p class="text-xs text-slate-400 font-mono">{ o.masked_phone() }</p>
+                    </div>
+                    { status_badge(&o.status) }
                 </div>
-                <p class="text-sm text-gray-800 mt-0.5">{ &o.passenger_name }</p>
-                <p class="text-xs text-gray-500">{ o.masked_phone() }</p>
             </div>
 
-            // Journey
-            <div class="text-xs space-y-0.5 text-gray-600">
-                <p>{ format!("{} ({})", o.route_name, o.route_code) }</p>
-                <p>{ format!("Train {}  ·  {}", o.train_number, o.fmt_departure()) }</p>
-                <p>{ format!("{} — {}", o.seat_class_name, o.seat_number.as_deref().unwrap_or("—")) }</p>
-                <p class="font-semibold text-gray-800">{ format!("Fare: ${}", o.fare_amount) }</p>
-                if o.disruption_flag {
-                    <p class="text-amber-600 font-medium">{"⚠ Disruption flagged"}</p>
-                }
+            // Journey details
+            <div class="px-5 py-3 border-b border-slate-100 space-y-1.5">
+                <div class="flex items-center gap-1.5 text-xs text-slate-600">
+                    { icons::ticket("w-3.5 h-3.5 text-slate-400 shrink-0") }
+                    { format!("{} ({})", o.route_name, o.route_code) }
+                </div>
+                <div class="flex items-center gap-1.5 text-xs text-slate-600">
+                    { icons::calendar("w-3.5 h-3.5 text-slate-400 shrink-0") }
+                    { format!("Train {}  ·  {}", o.train_number, o.fmt_departure()) }
+                </div>
+                <div class="flex items-center gap-1.5 text-xs text-slate-600">
+                    { icons::tag("w-3.5 h-3.5 text-slate-400 shrink-0") }
+                    { format!("{} — {}", o.seat_class_name, o.seat_number.as_deref().unwrap_or("—")) }
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-semibold text-slate-900">
+                        { format!("${}", o.fare_amount) }
+                    </span>
+                    if o.disruption_flag {
+                        <span class="inline-flex items-center gap-1 text-xs text-amber-600 font-medium">
+                            { icons::exclamation_triangle("w-3.5 h-3.5") }
+                            {"Disruption"}
+                        </span>
+                    }
+                </div>
             </div>
 
             // Action success banner
             if **action_ok {
-                <p class="text-xs text-green-700 font-medium bg-green-50 rounded px-2 py-1">{"✓ Action applied"}</p>
+                <div class="mx-5 my-3 flex items-center gap-2 rounded-lg bg-emerald-50
+                            border border-emerald-200 px-3 py-2 text-xs text-emerald-700">
+                    { icons::check_circle("w-4 h-4 text-emerald-500 shrink-0") }
+                    {"Action applied successfully"}
+                </div>
             }
 
             // Action buttons
-            if can_manage && **action == 0 {
-                <div class="flex flex-wrap gap-1.5">
-                    if matches!(o.status.as_str(), "pending" | "held") {
-                        <ActionBtn label="Confirm" kind=1u8 cls="bg-green-600 hover:bg-green-700" dispatch={dispatch.clone()} />
-                    }
-                    if matches!(o.status.as_str(), "pending" | "held" | "confirmed") {
-                        <ActionBtn label="Cancel"       kind=2u8 cls="bg-red-600 hover:bg-red-700"    dispatch={dispatch.clone()} />
-                    }
-                    if can_refund && o.status == "cancelled" {
-                        <ActionBtn label="Refund"       kind=3u8 cls="bg-purple-600 hover:bg-purple-700" dispatch={dispatch.clone()} />
-                    }
-                    if can_fee {
-                        <ActionBtn label="Fee Override" kind=4u8 cls="bg-amber-600 hover:bg-amber-700"   dispatch={dispatch.clone()} />
-                    }
-                    if !o.disruption_flag {
-                        <ActionBtn label="Flag Disruption" kind=5u8 cls="bg-slate-600 hover:bg-slate-700" dispatch={dispatch.clone()} />
-                    }
-                </div>
-            }
+            <div class="px-5 py-4 space-y-3">
+                if can_manage && **action == 0 {
+                    <div class="flex flex-wrap gap-1.5">
+                        if matches!(o.status.as_str(), "pending" | "held") {
+                            <ActionBtn label="Confirm" kind=1u8 style="success" dispatch={dispatch.clone()} />
+                        }
+                        if matches!(o.status.as_str(), "pending" | "held" | "confirmed") {
+                            <ActionBtn label="Cancel"  kind=2u8 style="danger"   dispatch={dispatch.clone()} />
+                        }
+                        if can_refund && o.status == "cancelled" {
+                            <ActionBtn label="Refund"       kind=3u8 style="warning"  dispatch={dispatch.clone()} />
+                        }
+                        if can_fee {
+                            <ActionBtn label="Fee Override" kind=4u8 style="secondary" dispatch={dispatch.clone()} />
+                        }
+                        if !o.disruption_flag {
+                            <ActionBtn label="Flag Disruption" kind=5u8 style="secondary" dispatch={dispatch.clone()} />
+                        }
+                    </div>
+                }
 
-            // Cancel form
-            if **action == 2 {
-                <div class="space-y-2">
-                    <p class="text-xs font-semibold text-gray-600">{"Cancel Order"}</p>
-                    <textarea placeholder="Cancellation reason (required)"
-                        rows="2"
-                        class="w-full rounded border border-gray-300 text-xs px-2 py-1.5 resize-none"
-                        oninput={{ let s = form_reason.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }}>
-                    </textarea>
-                    <label class="flex items-center gap-2 text-xs">
-                        <input type="checkbox"
-                            onchange={{ let d = form_disrupt.clone(); Callback::from(move |e: Event| {
-                                use web_sys::HtmlInputElement;
-                                if let Some(el) = e.target().and_then(|t| t.dyn_into::<HtmlInputElement>().ok()) {
-                                    d.set(el.checked());
-                                }
-                            })}} />
-                        {"Service disruption"}
-                    </label>
-                    { err_html(action_err) }
-                    { form_btns(dispatch, action, action_err, 2) }
-                </div>
-            }
+                // Cancel form
+                if **action == 2 {
+                    <div class="space-y-2.5">
+                        <p class="text-xs font-semibold text-slate-600">{"Cancel Order"}</p>
+                        <textarea placeholder="Cancellation reason (required)"
+                            rows="2"
+                            class="block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 \
+                                   text-sm text-slate-900 placeholder-slate-400 shadow-sm resize-none \
+                                   focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            oninput={{ let s = form_reason.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }}>
+                        </textarea>
+                        <label class="flex items-center gap-2 text-xs text-slate-600 cursor-pointer">
+                            <input type="checkbox"
+                                class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                onchange={{ let d = form_disrupt.clone(); Callback::from(move |e: Event| {
+                                    use web_sys::HtmlInputElement;
+                                    if let Some(el) = e.target().and_then(|t| t.dyn_into::<HtmlInputElement>().ok()) {
+                                        d.set(el.checked());
+                                    }
+                                })}} />
+                            {"Service disruption"}
+                        </label>
+                        { err_html(action_err) }
+                        { form_btns(dispatch, action, action_err, 2) }
+                    </div>
+                }
 
-            // Refund form
-            if **action == 3 {
-                <div class="space-y-2">
-                    <p class="text-xs font-semibold text-gray-600">{"Process Refund"}</p>
-                    <input type="number" step="0.01" placeholder="Refund amount (USD)"
-                        class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                        oninput={{ let s = form_amount.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
-                    { err_html(action_err) }
-                    { form_btns(dispatch, action, action_err, 3) }
-                </div>
-            }
+                // Refund form
+                if **action == 3 {
+                    <div class="space-y-2.5">
+                        <p class="text-xs font-semibold text-slate-600">{"Process Refund"}</p>
+                        <input type="number" step="0.01" placeholder="Refund amount (USD)"
+                            class={input_cls()}
+                            oninput={{ let s = form_amount.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
+                        { err_html(action_err) }
+                        { form_btns(dispatch, action, action_err, 3) }
+                    </div>
+                }
 
-            // Fee override form
-            if **action == 4 {
-                <div class="space-y-2">
-                    <p class="text-xs font-semibold text-gray-600">{"Fee Override"}</p>
-                    <input type="number" step="0.01" placeholder="Override amount (USD)"
-                        class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                        oninput={{ let s = form_amount.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
-                    <input type="text" placeholder="Reason (required)"
-                        class="w-full rounded border border-gray-300 text-xs px-2 py-1.5"
-                        oninput={{ let s = form_reason.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
-                    { err_html(action_err) }
-                    { form_btns(dispatch, action, action_err, 4) }
-                </div>
-            }
+                // Fee override form
+                if **action == 4 {
+                    <div class="space-y-2.5">
+                        <p class="text-xs font-semibold text-slate-600">{"Fee Override"}</p>
+                        <input type="number" step="0.01" placeholder="Override amount (USD)"
+                            class={input_cls()}
+                            oninput={{ let s = form_amount.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
+                        <input type="text" placeholder="Reason (required)"
+                            class={input_cls()}
+                            oninput={{ let s = form_reason.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
+                        { err_html(action_err) }
+                        { form_btns(dispatch, action, action_err, 4) }
+                    </div>
+                }
+            </div>
 
             // Event timeline
             if !resp.events.is_empty() {
-                <div>
-                    <p class="text-xs font-semibold text-gray-500 uppercase mb-1">{"Event Timeline"}</p>
-                    <div class="space-y-1">
+                <div class="px-5 pb-4">
+                    <p class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-3">
+                        {"Event Timeline"}
+                    </p>
+                    <div class="space-y-2">
                     { for resp.events.iter().map(|ev| html! {
-                        <div class="text-xs border-l-2 border-gray-200 pl-2 py-0.5">
-                            <span class="font-medium text-gray-700">{ &ev.event_type }</span>
-                            if let Some(r) = &ev.reason {
-                                <span class="text-gray-500">{ " — " }{ r }</span>
-                            }
-                            <p class="text-gray-400">{ crate::api::ops::fmt_dt(&ev.created_at) }</p>
+                        <div class="flex items-start gap-2.5">
+                            <div class="mt-0.5 w-1.5 h-1.5 rounded-full bg-slate-300 shrink-0 mt-1.5"></div>
+                            <div class="min-w-0 flex-1">
+                                <div class="flex items-baseline gap-1.5 flex-wrap">
+                                    <span class="text-xs font-semibold text-slate-700">
+                                        { &ev.event_type }
+                                    </span>
+                                    if let Some(r) = &ev.reason {
+                                        <span class="text-xs text-slate-500 truncate">{ r }</span>
+                                    }
+                                </div>
+                                <p class="text-[10px] text-slate-400 tabular-nums">
+                                    { crate::api::ops::fmt_dt(&ev.created_at) }
+                                </p>
+                            </div>
                         </div>
                     })}
                     </div>
@@ -516,13 +609,13 @@ fn order_detail_html(
     }
 }
 
-// ── Sub-component: small action button ────────────────────────────────────────
+// ── Sub-component: action button ───────────────────────────────────────────────
 
 #[derive(Properties, PartialEq)]
 struct ActionBtnProps {
     label:    &'static str,
     kind:     u8,
-    cls:      &'static str,
+    style:    &'static str,
     dispatch: Callback<u8>,
 }
 
@@ -530,10 +623,19 @@ struct ActionBtnProps {
 fn action_btn_comp(props: &ActionBtnProps) -> Html {
     let kind     = props.kind;
     let dispatch = props.dispatch.clone();
+    let cls = match props.style {
+        "success"   => "inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 \
+                        text-xs font-semibold text-white hover:bg-emerald-700 transition-colors",
+        "danger"    => "inline-flex items-center gap-1 rounded-lg bg-red-600 px-2.5 py-1.5 \
+                        text-xs font-semibold text-white hover:bg-red-700 transition-colors",
+        "warning"   => "inline-flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1.5 \
+                        text-xs font-semibold text-white hover:bg-amber-700 transition-colors",
+        _ /* secondary */ => "inline-flex items-center gap-1 rounded-lg border border-slate-300 \
+                        bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 \
+                        hover:bg-slate-50 transition-colors",
+    };
     html! {
-        <button
-            class={format!("rounded px-2.5 py-1 text-xs text-white transition {}", props.cls)}
-            onclick={Callback::from(move |_| dispatch.emit(kind))}>
+        <button class={cls} onclick={Callback::from(move |_| dispatch.emit(kind))}>
             { props.label }
         </button>
     }
@@ -544,9 +646,10 @@ fn action_btn_comp(props: &ActionBtnProps) -> Html {
 fn tab_btn(label: &'static str, idx: u8, active: &UseStateHandle<u8>) -> Html {
     let is_active = **active == idx;
     let cls = if is_active {
-        "px-4 py-2 text-sm font-medium text-blue-700 border-b-2 border-blue-600"
+        "px-4 py-2.5 text-sm font-medium text-indigo-700 border-b-2 border-indigo-600 transition-colors"
     } else {
-        "px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 border-b-2 border-transparent"
+        "px-4 py-2.5 text-sm font-medium text-slate-500 hover:text-slate-800 \
+         border-b-2 border-transparent transition-colors"
     };
     let active = active.clone();
     html! {
@@ -560,18 +663,24 @@ fn pagination_html(page: &UseStateHandle<i64>, total_pages: i64) -> Html {
     if total_pages <= 1 { return html! {}; }
     let cur = **page;
     html! {
-        <div class="mt-3 flex items-center gap-2 text-sm">
+        <div class="flex items-center gap-3">
             if cur > 1 {
-                <button class="px-3 py-1 rounded border border-gray-300 hover:bg-gray-100"
+                <button
+                    class={btn_secondary()}
                     onclick={{ let p = page.clone(); Callback::from(move |_| p.set(cur - 1)) }}>
-                    {"← Prev"}
+                    { icons::chevron_left("w-4 h-4") }
+                    {"Prev"}
                 </button>
             }
-            <span class="text-gray-500">{ format!("Page {} of {}", cur, total_pages) }</span>
+            <span class="text-sm text-slate-500">
+                { format!("Page {} of {}", cur, total_pages) }
+            </span>
             if cur < total_pages {
-                <button class="px-3 py-1 rounded border border-gray-300 hover:bg-gray-100"
+                <button
+                    class={btn_secondary()}
                     onclick={{ let p = page.clone(); Callback::from(move |_| p.set(cur + 1)) }}>
-                    {"Next →"}
+                    {"Next"}
+                    { icons::chevron_right("w-4 h-4") }
                 </button>
             }
         </div>
@@ -590,16 +699,28 @@ fn form_btns(
     html! {
         <div class="flex gap-2">
             <button type="button"
-                class="flex-1 rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700"
+                class={btn_primary()}
                 onclick={Callback::from(move |_| dispatch.emit(kind))}>
                 {"Submit"}
             </button>
             <button type="button"
-                class="rounded border border-gray-300 px-3 py-1.5 text-xs hover:bg-gray-50"
+                class={btn_secondary()}
                 onclick={Callback::from(move |_| { action_c.set(0); action_err.set(None); })}>
                 {"Cancel"}
             </button>
         </div>
+    }
+}
+
+fn err_html(err: &UseStateHandle<Option<String>>) -> Html {
+    match err.as_ref() {
+        Some(msg) => html! {
+            <div class="flex items-center gap-1.5 text-xs text-red-600">
+                { icons::exclamation_triangle("w-3.5 h-3.5 shrink-0") }
+                { msg }
+            </div>
+        },
+        None => html! {},
     }
 }
 
@@ -616,11 +737,4 @@ fn ev_input(e: &InputEvent) -> String {
         .and_then(|t| t.dyn_into::<HtmlInputElement>().ok())
         .map(|el| el.value())
         .unwrap_or_default()
-}
-
-fn err_html(err: &UseStateHandle<Option<String>>) -> Html {
-    match err.as_ref() {
-        Some(msg) => html! { <p class="text-xs text-red-600">{ msg }</p> },
-        None      => html! {},
-    }
 }

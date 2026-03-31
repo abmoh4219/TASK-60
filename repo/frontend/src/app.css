@@ -1,0 +1,52 @@
+/* ── Tailwind CSS directives ─────────────────────────────────────────────────
+   This file is the entry point for the Tailwind CSS standalone CLI.
+   It is processed at Docker build time (see Dockerfile frontend-builder stage).
+   Output is written to frontend/tailwind.css and bundled by trunk.
+   ──────────────────────────────────────────────────────────────────────────── */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Smooth font rendering ─────────────────────────────────────────────────── */
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* ── Custom scrollbar (sidebar) ────────────────────────────────────────────── */
+.scrollbar-thin::-webkit-scrollbar          { width: 4px; }
+.scrollbar-thin::-webkit-scrollbar-track    { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb    { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+/* ── Accessible focus ring ─────────────────────────────────────────────────── */
+.focus-ring { outline: none; }
+.focus-ring:focus-visible {
+  box-shadow: 0 0 0 2px #6366f1, 0 0 0 4px rgba(99,102,241,0.2);
+  border-radius: 4px;
+}
+
+/* ── Table row styles ──────────────────────────────────────────────────────── */
+.table-row-hover:hover  { background-color: #f8fafc; cursor: pointer; }
+.table-row-active       { background-color: #eef2ff !important; }
+
+/* ── Skeleton loading shimmer ──────────────────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* ── Sidebar width transition ──────────────────────────────────────────────── */
+.sidebar-transition { transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1); }
+
+/* ── Kiosk prose styles ────────────────────────────────────────────────────── */
+.kiosk-prose p { margin-bottom: 1rem; line-height: 1.75; }
