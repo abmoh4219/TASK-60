@@ -34,6 +34,7 @@ gloo-net     = { version = "0.5" }
 gloo-storage = { version = "0.3" }
 gloo-timers  = { version = "0.3", features = ["futures"] }
 gloo-utils   = { version = "0.2" }
+futures      = { version = "0.3" }
 
 # ── Serialization ─────────────────────────────────────────────────────────────
 serde      = { workspace = true }

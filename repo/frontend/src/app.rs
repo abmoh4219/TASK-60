@@ -3,7 +3,8 @@
 //! Responsibilities:
 //!   • Provide `AuthContext` to the entire tree.
 //!   • On first render, attempt to verify any stored token by calling /me.
-//!   • Route between Login and Dashboard, enforcing auth guards declaratively.
+//!   • Route between the public Kiosk, Login, and Dashboard, enforcing auth
+//!     guards on the staff-facing routes.
 
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
@@ -12,19 +13,38 @@ use yew_router::prelude::*;
 use crate::{
     api,
     auth::{AuthAction, AuthContext, AuthState, AuthStatus},
-    pages::LoginPage,
+    pages::{
+        KioskArchivePage, KioskArticlePage, KioskHomePage, KioskSearchPage,
+        LoginPage, OpsOrdersPage, OpsSchedulesPage,
+    },
 };
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Routable, PartialEq)]
 pub enum Route {
+    // Root redirects to the public kiosk home.
     #[at("/")]
     Home,
+
+    // ── Public kiosk ─────────────────────────────────────────────────────
+    #[at("/kiosk")]
+    Kiosk,
+    #[at("/kiosk/search")]
+    KioskSearch,
+    #[at("/kiosk/article/:slug")]
+    KioskArticle { slug: String },
+    #[at("/kiosk/archive")]
+    KioskArchive,
+
+    // ── Staff-facing ──────────────────────────────────────────────────────
     #[at("/login")]
     Login,
-    #[at("/dashboard")]
-    Dashboard,
+    #[at("/ops/schedules")]
+    OpsSchedules,
+    #[at("/ops/orders")]
+    OpsOrders,
+
     #[not_found]
     #[at("/404")]
     NotFound,
@@ -66,9 +86,20 @@ pub fn app() -> Html {
 
 fn switch(route: Route) -> Html {
     match route {
-        Route::Home => html! { <Redirect<Route> to={Route::Dashboard} /> },
-        Route::Login => html! { <LoginPage /> },
-        Route::Dashboard => html! { <RequireAuth><DashboardPlaceholder /></RequireAuth> },
+        // Redirect bare "/" to the public kiosk home.
+        Route::Home => html! { <Redirect<Route> to={Route::Kiosk} /> },
+
+        // ── Public kiosk ─────────────────────────────────────────────────
+        Route::Kiosk                     => html! { <KioskHomePage /> },
+        Route::KioskSearch               => html! { <KioskSearchPage /> },
+        Route::KioskArticle { slug }     => html! { <KioskArticlePage slug={slug} /> },
+        Route::KioskArchive              => html! { <KioskArchivePage /> },
+
+        // ── Staff-facing ──────────────────────────────────────────────────
+        Route::Login        => html! { <LoginPage /> },
+        Route::OpsSchedules => html! { <OpsSchedulesPage /> },
+        Route::OpsOrders    => html! { <OpsOrdersPage /> },
+
         Route::NotFound => html! {
             <div class="flex items-center justify-center min-h-screen">
                 <p class="text-gray-500">{"404 — Page not found"}</p>
@@ -102,54 +133,5 @@ fn require_auth(props: &RequireAuthProps) -> Html {
         AuthStatus::Authenticated(_) => html! {
             { for props.children.iter() }
         },
-    }
-}
-
-// ── Dashboard placeholder (replaced in later steps) ──────────────────────────
-
-#[function_component(DashboardPlaceholder)]
-fn dashboard_placeholder() -> Html {
-    let auth      = use_context::<AuthContext>().expect("AuthContext missing");
-    let navigator = use_navigator().unwrap();
-
-    let on_logout = {
-        let auth      = auth.clone();
-        let navigator = navigator.clone();
-        Callback::from(move |_: MouseEvent| {
-            let token     = auth.token.clone();
-            let auth      = auth.clone();
-            let navigator = navigator.clone();
-            spawn_local(async move {
-                if let Some(t) = token {
-                    let _ = api::logout(&t).await;
-                }
-                auth.dispatch(AuthAction::Logout);
-                navigator.push(&Route::Login);
-            });
-        })
-    };
-
-    let user = auth.current_user();
-    html! {
-        <div class="min-h-screen bg-gray-50 p-8">
-            <div class="max-w-2xl mx-auto bg-white rounded-xl shadow p-8 space-y-4">
-                <h1 class="text-2xl font-bold text-gray-900">{"RailOps Dashboard"}</h1>
-                if let Some(u) = user {
-                    <p class="text-gray-600">
-                        {"Welcome, "}<strong>{ u.display_name() }</strong>
-                        {" ("}<span class="text-blue-600">{ u.role_label() }</span>{")"}
-                    </p>
-                }
-                <p class="text-sm text-gray-400">
-                    {"Full dashboard is implemented in step 3."}
-                </p>
-                <button
-                    onclick={on_logout}
-                    class="rounded bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700"
-                >
-                    {"Sign out"}
-                </button>
-            </div>
-        </div>
     }
 }

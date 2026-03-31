@@ -1,4 +1,7 @@
 //! Typed API client for the RailOps backend.
+
+pub mod kiosk;
+pub mod ops;
 //!
 //! Every request (except /auth/login) is signed:
 //!   message   = "METHOD\nPATH\nUNIX_TIMESTAMP_SECS"
@@ -91,7 +94,7 @@ async fn post_unsigned<B: Serialize, R: DeserializeOwned>(
     parse_json(resp).await
 }
 
-async fn signed_request<B: Serialize>(
+pub(crate) async fn signed_request<B: Serialize>(
     method:  &str,
     path:    &str,
     token:   &str,
@@ -146,7 +149,7 @@ async fn signed_request<B: Serialize>(
     }
 }
 
-async fn parse_json<T: DeserializeOwned>(resp: Response) -> ApiResult<T> {
+pub(crate) async fn parse_json<T: DeserializeOwned>(resp: Response) -> ApiResult<T> {
     if resp.ok() {
         resp.json::<T>()
             .await

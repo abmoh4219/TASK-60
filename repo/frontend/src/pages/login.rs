@@ -22,7 +22,7 @@ pub fn login_page() -> Html {
 
     // Redirect if already authenticated.
     if auth.is_authenticated() {
-        navigator.push(&Route::Dashboard);
+        navigator.push(&Route::OpsSchedules);
         return html! {};
     }
 
@@ -87,7 +87,7 @@ pub fn login_page() -> Html {
                             full_name: resp.user.full_name,
                         };
                         auth.dispatch(AuthAction::SetUser { token: resp.token, user });
-                        navigator.push(&Route::Dashboard);
+                        navigator.push(&Route::OpsSchedules);
                     }
                     Err(e) => {
                         error.set(Some(e.message));

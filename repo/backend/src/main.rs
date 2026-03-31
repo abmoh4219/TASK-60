@@ -6,14 +6,18 @@
 //!   3. Self-signed TLS cert (if absent)
 //!   4. PostgreSQL connection + migrations
 //!   5. Admin (and seeded dev-user) password hashing on first boot
-//!   6. Actix-web HTTPS server with auth routes
+//!   6. Crawl engine background task
+//!   7. Actix-web HTTPS server with auth + crawl routes
 
 mod auth;
 mod config;
+mod crawl;
 mod crypto;
 mod db;
 mod domain;
 mod error;
+mod kiosk;
+mod ops;
 
 use actix_files::Files;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
@@ -24,6 +28,11 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use auth::middleware::RateLimiter;
 use config::AppConfig;
+use crawl::engine::{CrawlEngine, TriggerHandle};
+use crawl::handlers as crawl_handlers;
+use kiosk::handlers as kiosk_handlers;
+use ops::orders as ops_orders;
+use ops::schedules as ops_schedules;
 
 #[actix_web::main]
 async fn main() -> Result<()> {
@@ -50,10 +59,16 @@ async fn main() -> Result<()> {
 
     seed_pending_passwords(&pool, &cfg.security.admin_seed_password).await?;
 
-    // ── Shared app state ───────────────────────────────────────────────────
+    // ── Crawl engine ───────────────────────────────────────────────────────────
+    let (trigger_handle, trigger_rx) = TriggerHandle::new();
+    CrawlEngine::new(pool.clone(), shared::rules::CRAWL_MAX_WORKERS).spawn(trigger_rx);
+    info!("CrawlEngine started in background");
+
+    // ── Shared app state ───────────────────────────────────────────────────────
     let pool_data    = web::Data::new(pool);
     let cfg_data     = web::Data::new(cfg.clone());
     let rate_limiter = web::Data::new(RateLimiter::new(cfg.security.rate_limit_rpm));
+    let trigger_data = web::Data::new(trigger_handle);
     let static_dir   = cfg.server.static_dir.clone();
     let bind_addr    = format!("{}:{}", cfg.server.host, cfg.server.port);
 
@@ -64,21 +79,103 @@ async fn main() -> Result<()> {
             .app_data(pool_data.clone())
             .app_data(cfg_data.clone())
             .app_data(rate_limiter.clone())
+            .app_data(trigger_data.clone())
             // Structured access log
             .wrap(middleware::Logger::default())
-            // ── Unauthenticated ────────────────────────────────────────
+            // ── Unauthenticated ────────────────────────────────────────────
             .route("/health", web::get().to(health))
-            // ── Auth endpoints (no signature required on /login) ───────
+            // ── Auth endpoints ─────────────────────────────────────────────
             .service(
                 web::scope("/api/v1/auth")
                     .route("/login",  web::post().to(auth::handlers::login))
                     .route("/logout", web::delete().to(auth::handlers::logout))
                     .route("/me",     web::get().to(auth::handlers::me)),
             )
-            // ── Domain API routes added in later steps ─────────────────
-            // .service(web::scope("/api/v1/schedules")…)
-            // .service(web::scope("/api/v1/orders")…)
-            // ── Yew SPA (served last; catch-all for any non-API path) ──
+            // ── Crawl management API ───────────────────────────────────────
+            .service(
+                web::scope("/api/v1/crawl")
+                    .route("/sources",
+                        web::get().to(crawl_handlers::list_sources))
+                    .route("/sources",
+                        web::post().to(crawl_handlers::create_source))
+                    .route("/sources/{id}",
+                        web::get().to(crawl_handlers::get_source))
+                    .route("/sources/{id}/tasks",
+                        web::get().to(crawl_handlers::list_tasks))
+                    .route("/sources/{id}/tasks",
+                        web::post().to(crawl_handlers::create_task))
+                    .route("/tasks/{id}/run",
+                        web::post().to(crawl_handlers::trigger_run))
+                    .route("/tasks/{id}/runs",
+                        web::get().to(crawl_handlers::list_runs))
+                    .route("/runs/{id}",
+                        web::get().to(crawl_handlers::get_run))
+                    .route("/runs/{id}/quality",
+                        web::get().to(crawl_handlers::quality_for_run))
+                    .route("/quality/quarantined",
+                        web::get().to(crawl_handlers::list_quarantined)),
+            )
+            // ── Public kiosk API (no auth required) ───────────────────────
+            .service(
+                web::scope("/api/v1/kiosk")
+                    .route("/content",
+                        web::get().to(kiosk_handlers::list_content))
+                    .route("/content/{slug}",
+                        web::get().to(kiosk_handlers::get_article))
+                    .route("/archive",
+                        web::get().to(kiosk_handlers::get_archive))
+                    .route("/categories",
+                        web::get().to(kiosk_handlers::list_categories))
+                    .route("/tags",
+                        web::get().to(kiosk_handlers::list_tags)),
+            )
+            // ── Operations console API ────────────────────────────────────
+            .service(
+                web::scope("/api/v1/ops")
+                    // Reference data
+                    .route("/routes",
+                        web::get().to(ops_schedules::list_routes))
+                    .route("/seat-classes",
+                        web::get().to(ops_schedules::list_seat_classes))
+                    // Schedules
+                    .route("/schedules",
+                        web::get().to(ops_schedules::list_schedules))
+                    .route("/schedules/{id}",
+                        web::get().to(ops_schedules::get_schedule))
+                    .route("/schedules/{id}/status",
+                        web::patch().to(ops_schedules::update_schedule_status))
+                    .route("/schedules/{id}/inventory",
+                        web::post().to(ops_schedules::correct_inventory))
+                    // Passengers
+                    .route("/passengers",
+                        web::get().to(ops_orders::search_passengers))
+                    .route("/passengers",
+                        web::post().to(ops_orders::create_passenger))
+                    .route("/passengers/{id}/pii-purge",
+                        web::post().to(ops_orders::request_pii_purge))
+                    // Orders
+                    .route("/orders",
+                        web::get().to(ops_orders::list_orders))
+                    .route("/orders",
+                        web::post().to(ops_orders::create_order))
+                    .route("/orders/by-number/{num}",
+                        web::get().to(ops_orders::find_by_number))
+                    .route("/orders/{id}",
+                        web::get().to(ops_orders::get_order))
+                    .route("/orders/{id}/confirm",
+                        web::post().to(ops_orders::confirm_order))
+                    .route("/orders/{id}/cancel",
+                        web::post().to(ops_orders::cancel_order))
+                    .route("/orders/{id}/refund",
+                        web::post().to(ops_orders::process_refund))
+                    .route("/orders/{id}/fee-override",
+                        web::post().to(ops_orders::apply_fee_override))
+                    .route("/orders/{id}/disruption",
+                        web::post().to(ops_orders::flag_disruption))
+                    .route("/orders/{id}/events",
+                        web::get().to(ops_orders::list_order_events)),
+            )
+            // ── Yew SPA (served last; catch-all for any non-API path) ──────
             .service(
                 Files::new("/", &static_dir)
                     .index_file("index.html")
@@ -105,8 +202,6 @@ async fn health() -> HttpResponse {
 // ── First-boot password seeding ───────────────────────────────────────────────
 
 /// Replace every `SEED_PENDING` hash in the users table with a real Argon2id hash.
-/// Admin gets `admin_seed_password`; all other seeded users get the same value
-/// (dev convenience — the admin must change these via the UI in production).
 async fn seed_pending_passwords(pool: &sqlx::PgPool, seed_pw: &str) -> Result<()> {
     let pending: Vec<(uuid::Uuid, String)> = sqlx::query_as(
         "SELECT id, username FROM users WHERE password_hash = 'SEED_PENDING'",
