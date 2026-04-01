@@ -407,15 +407,16 @@ pub async fn esign_credential(
     let signed_date = NaiveDate::parse_from_str(&body.signed_date, "%Y-%m-%d")
         .map_err(|_| AppError::Validation("signed_date must be YYYY-MM-DD".into()))?;
 
-    // Save drawn signature if provided
+    // Save drawn signature if provided — fail the request if storage fails.
     let sig_path = if let Some(ref sig_data) = body.signature_data {
         if !sig_data.is_empty() {
             let upload_dir = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "/app/uploads".to_owned());
             let sig_dir = format!("{upload_dir}/signatures");
-            let _ = tokio::fs::create_dir_all(&sig_dir).await;
-            let sig_file = format!("{sig_dir}/{id}_{}.svg", chrono::Utc::now().timestamp());
-            let _ = tokio::fs::write(&sig_file, sig_data.as_bytes()).await;
-            Some(format!("signatures/{id}_{}.svg", chrono::Utc::now().timestamp()))
+            tokio::fs::create_dir_all(&sig_dir).await?;
+            let ts = chrono::Utc::now().timestamp();
+            let sig_file = format!("{sig_dir}/{id}_{ts}.svg");
+            tokio::fs::write(&sig_file, sig_data.as_bytes()).await?;
+            Some(format!("signatures/{id}_{ts}.svg"))
         } else { None }
     } else { None };
 
@@ -513,10 +514,10 @@ pub async fn create_esignature(
         if !sig_data.is_empty() {
             let upload_dir = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "/app/uploads".to_owned());
             let sig_dir = format!("{upload_dir}/signatures");
-            let _ = tokio::fs::create_dir_all(&sig_dir).await;
+            tokio::fs::create_dir_all(&sig_dir).await?;
             let ts = chrono::Utc::now().timestamp();
             let sig_file = format!("{sig_dir}/{}_{ts}.svg", body.entity_id);
-            let _ = tokio::fs::write(&sig_file, sig_data.as_bytes()).await;
+            tokio::fs::write(&sig_file, sig_data.as_bytes()).await?;
             Some(format!("signatures/{}_{ts}.svg", body.entity_id))
         } else { None }
     } else { None };

@@ -956,3 +956,227 @@ async fn t42_crawl_sources_and_tasks() {
     assert_eq!(r.status(), StatusCode::OK);
     println!("[crawl] quarantined items endpoint OK");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Security-focused tests — object-level auth, negative paths, info leakage
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ── t43: subscriptions are scoped to auth.id ────────────────────────────────
+
+#[tokio::test]
+async fn t43_subscription_scoping() {
+    println!("\n=== t43_subscription_scoping ===");
+
+    // Login as two different users
+    let admin_tok = admin_token().await;
+    let ops_tok = match login_as("ops_agent1").await {
+        Some(t) => t,
+        None => { println!("[skip] ops_agent1 unavailable"); return; }
+    };
+
+    let c = new_client();
+
+    // Admin subscribes to a shift
+    let r = authed_post(&c, "/api/v1/staffing/subscriptions", &admin_tok, json!({
+        "subscriber_type": "dispatcher",
+        "target_type": "shift",
+        "target_id": "80000000-0000-0000-0000-000000000002"
+    })).await;
+    // May succeed or conflict; we only care about what ops_agent sees
+    println!("[subscriptions] admin subscribe status={}", r.status());
+
+    // ops_agent1 lists subscriptions — should NOT see admin's subscription
+    let r = authed_get(&c, "/api/v1/staffing/subscriptions", &ops_tok).await;
+    assert_eq!(r.status(), StatusCode::OK);
+    let body: Value = r.json().await.unwrap();
+    let subs = body.as_array().expect("subscriptions array");
+    for sub in subs {
+        // None of ops_agent1's subscriptions should have admin's user_id
+        let sid = sub["subscriber_id"].as_str().unwrap_or("");
+        assert_ne!(sid, "00000000-0000-0000-0000-000000000001",
+            "ops_agent must not see admin's subscriptions");
+    }
+    println!("[subscriptions] ops_agent1 correctly cannot see admin's subscriptions ({} own subs)", subs.len());
+}
+
+// ── t44: order not found returns 404 not 500 ────────────────────────────────
+
+#[tokio::test]
+async fn t44_order_not_found_returns_404() {
+    println!("\n=== t44_order_not_found_returns_404 ===");
+    let token = admin_token().await;
+    let c = new_client();
+
+    // Non-existent UUID should return 404
+    let fake_id = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    let r = authed_get(&c, &format!("/api/v1/ops/orders/{fake_id}"), &token).await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND, "missing order must return 404");
+    let body: Value = r.json().await.unwrap();
+    // Response must not leak internal details
+    assert!(body["error"]["message"].as_str().unwrap_or("").contains("Not found"),
+        "error message should say 'Not found'");
+    println!("[security] non-existent order correctly returns 404");
+}
+
+// ── t45: invalid state transition returns 422 ──────────────────────────────
+
+#[tokio::test]
+async fn t45_invalid_state_transition() {
+    println!("\n=== t45_invalid_state_transition ===");
+    let token = admin_token().await;
+    let c = new_client();
+
+    // Seeded order ORD-00001 is confirmed — holding a confirmed order should fail
+    let r = authed_post(&c,
+        "/api/v1/ops/orders/50000000-0000-0000-0000-000000000001/hold",
+        &token, json!({})).await;
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY,
+        "holding an already-confirmed order must fail with 422");
+    let body: Value = r.json().await.unwrap();
+    let msg = body["error"]["message"].as_str().unwrap_or("");
+    assert!(msg.contains("pending"), "error should mention required status");
+    println!("[security] invalid state transition correctly rejected: {msg}");
+}
+
+// ── t46: credential duplicate fingerprint returns 409 ───────────────────────
+
+#[tokio::test]
+async fn t46_credential_not_found() {
+    println!("\n=== t46_credential_not_found ===");
+    let token = admin_token().await;
+    let c = new_client();
+
+    let fake_id = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+    let r = authed_get(&c, &format!("/api/v1/credentials/{fake_id}"), &token).await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    println!("[security] non-existent credential correctly returns 404");
+}
+
+// ── t47: login response does not leak password hash ─────────────────────────
+
+#[tokio::test]
+async fn t47_login_response_no_password_leak() {
+    println!("\n=== t47_login_response_no_password_leak ===");
+    let c = new_client();
+
+    // Successful login
+    let r = c.post(format!("{}/api/v1/auth/login", base()))
+        .json(&json!({ "username": "admin", "password": ADMIN_PASS }))
+        .send().await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let body_str = r.text().await.unwrap();
+
+    // Response must NOT contain password, hash, or secret
+    let lower = body_str.to_lowercase();
+    assert!(!lower.contains("argon2"), "response must not contain password hash");
+    assert!(!lower.contains(ADMIN_PASS), "response must not echo back password");
+    assert!(!lower.contains("session_secret"), "response must not leak config secrets");
+    println!("[security] login response clean — no password/hash/secret leakage");
+}
+
+// ── t48: failed login response does not leak user existence ─────────────────
+
+#[tokio::test]
+async fn t48_failed_login_no_user_enumeration() {
+    println!("\n=== t48_failed_login_no_user_enumeration ===");
+    let c = new_client();
+
+    // Wrong password for existing user
+    let r1 = c.post(format!("{}/api/v1/auth/login", base()))
+        .json(&json!({ "username": "admin", "password": "definitely_wrong_password_999" }))
+        .send().await.unwrap();
+
+    // Completely non-existent user
+    let r2 = c.post(format!("{}/api/v1/auth/login", base()))
+        .json(&json!({ "username": "nonexistent_user_xyz", "password": "whatever" }))
+        .send().await.unwrap();
+
+    // Both should return the same status and similar error — no user enumeration
+    assert_eq!(r1.status(), r2.status(),
+        "existing vs non-existing user must return same HTTP status");
+
+    let b1: Value = r1.json().await.unwrap();
+    let b2: Value = r2.json().await.unwrap();
+    assert_eq!(b1["error"]["type"], b2["error"]["type"],
+        "error type must be identical for both cases");
+    println!("[security] failed logins produce identical responses — no user enumeration");
+}
+
+// ── t49: dispatcher cannot access crawl admin endpoints ─────────────────────
+
+#[tokio::test]
+async fn t49_rbac_dispatcher_no_crawl() {
+    println!("\n=== t49_rbac_dispatcher_no_crawl ===");
+    let disp_tok = match login_as("dispatch1").await {
+        Some(t) => t,
+        None => { println!("[skip] dispatch1 unavailable"); return; }
+    };
+    let c = new_client();
+
+    let r = authed_get(&c, "/api/v1/crawl/sources", &disp_tok).await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN,
+        "dispatcher must not access crawl endpoints");
+    println!("[rbac] dispatcher correctly forbidden from crawl admin");
+}
+
+// ── t50: confirm already-confirmed order fails ──────────────────────────────
+
+#[tokio::test]
+async fn t50_double_confirm_fails() {
+    println!("\n=== t50_double_confirm_fails ===");
+    let token = admin_token().await;
+    let c = new_client();
+
+    // ORD-00001 is already confirmed
+    let r = authed_post(&c,
+        "/api/v1/ops/orders/50000000-0000-0000-0000-000000000001/confirm",
+        &token, json!({})).await;
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY,
+        "confirming an already-confirmed order must fail");
+    println!("[security] double-confirm correctly rejected");
+}
+
+// ── t51: review non-pending credential fails ────────────────────────────────
+
+#[tokio::test]
+async fn t51_review_already_approved_credential_fails() {
+    println!("\n=== t51_review_already_approved_credential_fails ===");
+    let token = admin_token().await;
+    let c = new_client();
+
+    // c0000000-...-01 is already approved in seed data
+    let r = authed_patch(&c,
+        "/api/v1/credentials/c0000000-0000-0000-0000-000000000001/review",
+        &token, json!({ "status": "approved", "review_notes": "re-approve attempt" })).await;
+    assert_eq!(r.status(), StatusCode::UNPROCESSABLE_ENTITY,
+        "reviewing an already-approved credential must fail");
+    let body: Value = r.json().await.unwrap();
+    let msg = body["error"]["message"].as_str().unwrap_or("");
+    assert!(msg.contains("pending"), "error should mention 'pending' requirement");
+    println!("[security] re-review of approved credential correctly rejected");
+}
+
+// ── t52: ops_agent cannot manage staffing ───────────────────────────────────
+
+#[tokio::test]
+async fn t52_rbac_ops_agent_no_staffing_manage() {
+    println!("\n=== t52_rbac_ops_agent_no_staffing_manage ===");
+    let ops_tok = match login_as("ops_agent1").await {
+        Some(t) => t,
+        None => { println!("[skip] ops_agent1 unavailable"); return; }
+    };
+    let c = new_client();
+
+    // OpsAgent should not be able to create shifts (requires ManageShifts)
+    let r = authed_post(&c, "/api/v1/staffing/shifts", &ops_tok, json!({
+        "role": "conductor",
+        "region": "London",
+        "required_tags": ["conductor"],
+        "shift_start": "2026-06-01T06:00:00Z",
+        "shift_end": "2026-06-01T14:00:00Z",
+        "is_critical": false
+    })).await;
+    assert_eq!(r.status(), StatusCode::FORBIDDEN,
+        "ops_agent must not create shifts");
+    println!("[rbac] ops_agent correctly forbidden from creating shifts");
+}

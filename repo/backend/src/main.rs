@@ -387,6 +387,9 @@ async fn seed_pending_passwords(pool: &sqlx::PgPool, seed_pw: &str) -> Result<()
     .context("Failed to query pending password seeds")?;
 
     for (id, username) in &pending {
+        if let Some(err) = crypto::validate_password(seed_pw) {
+            anyhow::bail!("Seed password rejected: {err}");
+        }
         let hash = crypto::hash_password(seed_pw)
             .context("Failed to hash seed password")?;
         sqlx::query("UPDATE users SET password_hash = $1 WHERE id = $2")

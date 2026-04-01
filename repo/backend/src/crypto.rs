@@ -30,6 +30,19 @@ pub fn verify_password(password: &str, hash: &str) -> Result<bool> {
         .is_ok())
 }
 
+/// Validate that a password meets minimum policy requirements.
+/// Returns an error message if invalid, None if acceptable.
+pub fn validate_password(password: &str) -> Option<String> {
+    if password.len() < shared::rules::MIN_PASSWORD_LEN {
+        return Some(format!(
+            "Password must be at least {} characters (got {})",
+            shared::rules::MIN_PASSWORD_LEN,
+            password.len(),
+        ));
+    }
+    None
+}
+
 // ── AES-256-GCM PII encryption ────────────────────────────────────────────────
 
 use aes_gcm::{
