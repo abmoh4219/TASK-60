@@ -42,6 +42,11 @@ use staffing::handlers as staffing_handlers;
 
 #[actix_web::main]
 async fn main() -> Result<()> {
+    // rustls 0.23 requires an explicit process-level CryptoProvider.
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .expect("Failed to install rustls ring crypto provider");
+
     init_tracing();
 
     let cfg = AppConfig::from_env().context("Failed to load configuration")?;

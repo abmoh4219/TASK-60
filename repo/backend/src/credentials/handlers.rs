@@ -178,9 +178,11 @@ pub async fn upload_credential(
                 mime_type = Some(ct);
 
                 // Filename from Content-Disposition.
+                // content_disposition() returns Option<&ContentDisposition>
+                // in actix-multipart 0.7.x; use and_then to reach get_filename.
                 file_name = field
                     .content_disposition()
-                    .get_filename()
+                    .and_then(|cd| cd.get_filename())
                     .map(|s| s.to_owned());
 
                 // Stream bytes with size guard.

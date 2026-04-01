@@ -78,21 +78,22 @@ pub fn ops_orders_page() -> Html {
         let pg      = *order_page;
         let tab     = *active_tab;
         use_effect_with((search.clone(), status.clone(), pg, tab), move |_| {
-            if tab != 0 { return || (); }
-            loading.set(true);
-            spawn_local(async move {
-                let result = if !search.is_empty() && search.starts_with("RO") {
-                    ops_api::find_order_by_number(&token, &search).await
-                        .map(|o| Page { items: vec![o], total: 1, page: 1, per_page: 20, total_pages: 1 })
-                } else {
-                    let pax_id = if !search.is_empty() { None } else { None };
-                    ops_api::list_orders(&token, pax_id, None, Some(&status), pg).await
-                };
-                match result {
-                    Ok(p)  => { orders.set(Some(p)); loading.set(false); }
-                    Err(_) => { loading.set(false); }
-                }
-            });
+            if tab == 0 {
+                loading.set(true);
+                spawn_local(async move {
+                    let result = if !search.is_empty() && search.starts_with("RO") {
+                        ops_api::find_order_by_number(&token, &search).await
+                            .map(|o| Page { items: vec![o], total: 1, page: 1, per_page: 20, total_pages: 1 })
+                    } else {
+                        let pax_id = if !search.is_empty() { None } else { None };
+                        ops_api::list_orders(&token, pax_id, None, Some(&status), pg).await
+                    };
+                    match result {
+                        Ok(p)  => { orders.set(Some(p)); loading.set(false); }
+                        Err(_) => { loading.set(false); }
+                    }
+                });
+            }
             || ()
         });
     }
@@ -106,14 +107,15 @@ pub fn ops_orders_page() -> Html {
         let pg         = *pax_page;
         let tab        = *active_tab;
         use_effect_with((search.clone(), pg, tab), move |_| {
-            if tab != 1 { return || (); }
-            loading.set(true);
-            spawn_local(async move {
-                match ops_api::search_passengers(&token, &search, pg).await {
-                    Ok(p)  => { passengers.set(Some(p)); loading.set(false); }
-                    Err(_) => { loading.set(false); }
-                }
-            });
+            if tab == 1 {
+                loading.set(true);
+                spawn_local(async move {
+                    match ops_api::search_passengers(&token, &search, pg).await {
+                        Ok(p)  => { passengers.set(Some(p)); loading.set(false); }
+                        Err(_) => { loading.set(false); }
+                    }
+                });
+            }
             || ()
         });
     }

@@ -1,5 +1,3 @@
-version: "3.9"
-
 # =============================================================================
 # RailOps — docker compose up --build
 #
@@ -8,10 +6,17 @@ version: "3.9"
 #   app     — Actix-web backend + Yew frontend (persistent uploads + certs volumes)
 #
 # Services (test profile — started by run-test.sh):
-#   tester  — cargo test runner; targets the live `app` service at https://app:8443
+#   tester  — cargo test runner; targets the live `app` service at https://localhost:8443
 #
 # No .env file is used.  All configuration is declared inline below.
 # Change SESSION_SECRET and ADMIN_SEED_PASSWORD before any production deployment.
+#
+# Note: network_mode: host is used so both services share the host network,
+# bypassing Docker bridge routing (which requires the br_netfilter kernel
+# module).  The db container uses port 5433 (instead of the default 5432) to
+# avoid conflicting with any local PostgreSQL installation on the host.
+#
+# Access the app at: https://localhost:8443
 # =============================================================================
 
 services:
@@ -20,20 +25,21 @@ services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    network_mode: host
     environment:
       POSTGRES_DB:       railops
       POSTGRES_USER:     railops
       POSTGRES_PASSWORD: railops_dev_secret_2024   # change in production
+      PGPORT:            "5433"                    # avoid conflict with host postgres on 5432
+    command: postgres -p 5433
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U railops -d railops"]
+      test: ["CMD-SHELL", "pg_isready -U railops -d railops -p 5433"]
       interval:     5s
       timeout:      5s
       retries:      12
       start_period: 10s
-    networks:
-      - railops_net
 
   # ── Application (backend API + Yew frontend) ────────────────────────────────
   app:
@@ -41,6 +47,7 @@ services:
       context:    .
       dockerfile: Dockerfile
     restart: unless-stopped
+    network_mode: host
     depends_on:
       db:
         condition: service_healthy
@@ -50,9 +57,9 @@ services:
       SERVER_PORT: "8443"
       STATIC_DIR:  "/app/static"
 
-      # Database
-      DB_HOST:            db
-      DB_PORT:            "5432"
+      # Database — 127.0.0.1 + port 5433 (host-networked container postgres)
+      DB_HOST:            127.0.0.1
+      DB_PORT:            "5433"
       DB_NAME:            railops
       DB_USER:            railops
       DB_PASSWORD:        railops_dev_secret_2024   # must match POSTGRES_PASSWORD above
@@ -69,22 +76,16 @@ services:
       # Logging
       RUST_LOG: "backend=info,actix_web=info,sqlx=warn"
 
-    ports:
-      - "8443:8443"
-
     volumes:
       # Uploaded credential documents, drawn signatures, watermarked PDFs
       - uploads_data:/app/uploads
       # TLS certificate + key (generated once, persisted across restarts)
       - tls_certs:/app/certs
 
-    networks:
-      - railops_net
-
     healthcheck:
-      # TCP probe using bash's built-in /dev/tcp — no wget/curl required in the image.
-      # Confirms the TLS port is accepting connections; sufficient for startup ordering.
-      test: ["CMD", "bash", "-c", "echo > /dev/tcp/localhost/8443"]
+      # curl is installed in the runtime image (see Dockerfile runtime stage).
+      # -k accepts the self-signed cert; -sf fails silently on HTTP errors.
+      test: ["CMD", "curl", "-k", "-sf", "https://localhost:8443/health"]
       interval:     15s
       timeout:      10s
       retries:       5
@@ -93,18 +94,19 @@ services:
   # ── Test runner (cargo test suite) ─────────────────────────────────────────
   # Only activated with:  docker compose --profile test run --rm tester
   # Inherits the full Rust toolchain from the backend-builder Docker stage.
-  # Connects to `app` on the internal railops_net network (https://app:8443).
+  # Connects to `app` on localhost (host network mode).
   tester:
     build:
       context:    .
       dockerfile: Dockerfile
       target:     tester        # Uses the dedicated tester stage (has cargo + curl)
+    network_mode: host
     depends_on:
       app:
         condition: service_healthy
     environment:
       # Integration tests read this to form request URLs.
-      TEST_BASE_URL: "https://app:8443"
+      TEST_BASE_URL: "https://localhost:8443"
       # Silence noisy sqlx / actix logs during test compilation.
       RUST_LOG:      "off"
     # Three test suites run in sequence:
@@ -128,8 +130,6 @@ services:
         cargo test --test api_integration_test -p backend -- --nocapture;
         echo '';
         echo '══ All tests passed ══════════════════════════════'"
-    networks:
-      - railops_net
     profiles:
       - test
 
@@ -141,8 +141,3 @@ volumes:
     driver: local
   tls_certs:
     driver: local
-
-# ── Network ────────────────────────────────────────────────────────────────────
-networks:
-  railops_net:
-    driver: bridge

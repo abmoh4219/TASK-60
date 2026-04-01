@@ -41,9 +41,10 @@ pub struct UseToasts {
 
 // ── Hook ───────────────────────────────────────────────────────────────────────
 
+#[yew::hook]
 pub fn use_toasts() -> UseToasts {
-    let items:   UseStateHandle<Vec<ToastItem>> = use_state(Vec::new);
-    let next_id: UseStateHandle<u32>            = use_state(|| 0u32);
+    let items   = use_state(|| Vec::<ToastItem>::new());
+    let next_id = use_state(|| 0u32);
 
     let push = {
         let items   = items.clone();

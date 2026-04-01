@@ -49,7 +49,7 @@ pub fn kiosk_archive() -> Html {
     let location  = use_location().unwrap();
     let navigator = use_navigator().unwrap();
 
-    let params: ArchiveQuery = location.query().unwrap_or_default();
+    let params: ArchiveQuery = location.query::<ArchiveQuery>().unwrap_or_default();
 
     let data       = use_state(|| Option::<ArchiveData>::None);
     let loading    = use_state(|| true);

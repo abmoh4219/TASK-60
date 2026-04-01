@@ -56,7 +56,7 @@ base64       = { version = "0.22" }
 subtle       = { version = "2" }  # constant-time comparisons
 
 # ── TLS ───────────────────────────────────────────────────────────────────────
-rustls         = { version = "0.23" }
+rustls         = { version = "0.23", features = ["ring"] }
 rustls-pemfile = { version = "2" }
 rcgen          = { version = "0.12" }   # self-signed cert generation on first boot
 

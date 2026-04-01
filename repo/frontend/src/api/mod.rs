@@ -1,10 +1,4 @@
 //! Typed API client for the RailOps backend.
-
-pub mod credentials;
-pub mod kiosk;
-pub mod ops;
-pub mod rules;
-pub mod staffing;
 //!
 //! Every request (except /auth/login) is signed:
 //!   message   = "METHOD\nPATH\nUNIX_TIMESTAMP_SECS"
@@ -15,6 +9,12 @@ pub mod staffing;
 //!   Authorization: Bearer <token>
 //!   X-RailOps-Ts:  <unix_epoch_secs>
 //!   X-RailOps-Sig: <hmac_hex>
+
+pub mod credentials;
+pub mod kiosk;
+pub mod ops;
+pub mod rules;
+pub mod staffing;
 
 use gloo_net::http::{Request, Response};
 use hmac::{Hmac, Mac};

@@ -6,6 +6,7 @@
 //!   • Role-gated nav items (Staffing, Credentials, Rules)
 //!   • User profile card in sidebar footer with sign-out
 
+use gloo_storage::Storage as _;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -84,6 +85,8 @@ pub fn ops_layout(props: &OpsLayoutProps) -> Html {
 
     let col = *collapsed;
 
+    let kiosk_nav_item = NavItem { route: Route::Kiosk, label: "Passenger Kiosk", shortcut: "" };
+
     // ── Build nav items ───────────────────────────────────────────────────
     let mut nav_items: Vec<(NavItem, Html)> = vec![
         (NavItem { route: Route::OpsSchedules, label: "Schedules",   shortcut: "1" },
@@ -156,10 +159,7 @@ pub fn ops_layout(props: &OpsLayoutProps) -> Html {
                     <div class="my-3 border-t border-white/10"></div>
 
                     // Kiosk link
-                    {
-                        let kiosk_item = NavItem { route: Route::Kiosk, label: "Passenger Kiosk", shortcut: "" };
-                        nav_item(icons::home("w-5 h-5"), &kiosk_item, &props.active, col)
-                    }
+                    { nav_item(icons::home("w-5 h-5"), &kiosk_nav_item, &props.active, col) }
                 </nav>
 
                 // Sidebar footer — user info
@@ -262,8 +262,7 @@ fn nav_item(icon: Html, item: &NavItem, active: &Route, collapsed: bool) -> Html
     };
 
     html! {
-        <Link<Route> to={route} classes={cls}
-            title={if collapsed { item.label } else { "" }}>
+        <Link<Route> to={route} classes={cls}>
             <span class="shrink-0">{ icon }</span>
             if !collapsed {
                 <span class="flex-1 truncate">{ item.label }</span>

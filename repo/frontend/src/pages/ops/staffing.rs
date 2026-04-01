@@ -113,14 +113,15 @@ pub fn ops_staffing_page() -> Html {
         use_effect_with(
             (status.clone(), region.clone(), role.clone(), pg, tab),
             move |_| {
-                if tab != 0 { return || (); }
-                loading.set(true);
-                spawn_local(async move {
-                    match staffing_api::list_shifts(&token, &status, &region, &role, pg).await {
-                        Ok(p)  => { shifts.set(Some(p));  loading.set(false); }
-                        Err(_) => { loading.set(false); }
-                    }
-                });
+                if tab == 0 {
+                    loading.set(true);
+                    spawn_local(async move {
+                        match staffing_api::list_shifts(&token, &status, &region, &role, pg).await {
+                            Ok(p)  => { shifts.set(Some(p));  loading.set(false); }
+                            Err(_) => { loading.set(false); }
+                        }
+                    });
+                }
                 || ()
             },
         );
@@ -136,14 +137,15 @@ pub fn ops_staffing_page() -> Html {
         let pg          = *ctr_page;
         let tab         = *active_tab;
         use_effect_with((region.clone(), active, pg, tab), move |_| {
-            if tab != 1 { return || (); }
-            loading.set(true);
-            spawn_local(async move {
-                match staffing_api::list_contractors(&token, &region, active, pg).await {
-                    Ok(p)  => { contractors.set(Some(p)); loading.set(false); }
-                    Err(_) => { loading.set(false); }
-                }
-            });
+            if tab == 1 {
+                loading.set(true);
+                spawn_local(async move {
+                    match staffing_api::list_contractors(&token, &region, active, pg).await {
+                        Ok(p)  => { contractors.set(Some(p)); loading.set(false); }
+                        Err(_) => { loading.set(false); }
+                    }
+                });
+            }
             || ()
         });
     }
@@ -537,10 +539,10 @@ pub fn ops_staffing_page() -> Html {
                                     detail,
                                     &candidates,
                                     *cands_loading,
-                                    cands_err.as_ref().as_ref(),
+                                    cands_err.as_ref(),
                                     can_manage,
-                                    action_err.as_ref().as_ref(),
-                                    action_ok.as_ref().as_ref(),
+                                    action_err.as_ref(),
+                                    action_ok.as_ref(),
                                     on_load_candidates.clone(),
                                     on_propose.clone(),
                                     on_respond.clone(),
@@ -567,7 +569,7 @@ pub fn ops_staffing_page() -> Html {
                             }
 
                             // ── Subscriptions ─────────────────────────────
-                            { render_subscriptions(&subs, *subs_loading, sub_err.as_ref().as_ref(), on_unsub.clone()) }
+                            { render_subscriptions(&subs, *subs_loading, sub_err.as_ref(), on_unsub.clone()) }
                         </div>
                     </div>
                 }

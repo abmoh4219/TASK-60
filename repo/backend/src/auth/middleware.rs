@@ -135,10 +135,13 @@ impl FromRequest for AuthUser {
             // ── 5. Touch session (reset idle expiry) ─────────────────────
             session::touch_session(&pool, &token_hash).await?;
 
+            // Compute role before moving username out of record (E0382 fix:
+            // user_role() borrows self, which must happen before partial move).
+            let role = record.user_role();
             Ok(AuthUser {
                 id:         record.user_id,
                 username:   record.username,
-                role:       record.user_role(),
+                role,
                 full_name:  record.full_name,
                 token_hash,
             })

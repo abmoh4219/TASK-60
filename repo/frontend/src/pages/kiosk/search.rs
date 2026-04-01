@@ -41,7 +41,7 @@ pub fn kiosk_search() -> Html {
     let navigator = use_navigator().unwrap();
 
     // Parse URL query params.
-    let url_q: SearchQuery = location.query().unwrap_or_default();
+    let url_q: SearchQuery = location.query::<SearchQuery>().unwrap_or_default();
 
     // Raw input state (what the user is currently typing — debounced).
     let raw_input = use_state(|| url_q.q.clone().unwrap_or_default());
@@ -150,8 +150,9 @@ pub fn kiosk_search() -> Html {
 
     let on_clear_query = {
         let navigator = navigator.clone();
-        let mut q = url_q.clone();
+        let q = url_q.clone();
         Callback::from(move |_: MouseEvent| {
+            let mut q = q.clone();
             q.q    = None;
             q.page = None;
             navigator.push_with_query(&Route::KioskSearch, &q).ok();
@@ -160,8 +161,9 @@ pub fn kiosk_search() -> Html {
 
     let make_category_cb = |cat: Option<String>| {
         let navigator = navigator.clone();
-        let mut q = url_q.clone();
+        let q = url_q.clone();
         Callback::from(move |_: MouseEvent| {
+            let mut q = q.clone();
             q.category = cat.clone();
             q.page     = None;
             navigator.push_with_query(&Route::KioskSearch, &q).ok();
@@ -170,8 +172,9 @@ pub fn kiosk_search() -> Html {
 
     let make_tag_cb = |tag: Option<String>| {
         let navigator = navigator.clone();
-        let mut q = url_q.clone();
+        let q = url_q.clone();
         Callback::from(move |_: MouseEvent| {
+            let mut q = q.clone();
             q.tag  = tag.clone();
             q.page = None;
             navigator.push_with_query(&Route::KioskSearch, &q).ok();
@@ -180,8 +183,9 @@ pub fn kiosk_search() -> Html {
 
     let make_page_cb = |p: i64| {
         let navigator = navigator.clone();
-        let mut q = url_q.clone();
+        let q = url_q.clone();
         Callback::from(move |_: MouseEvent| {
+            let mut q = q.clone();
             q.page = Some(p);
             navigator.push_with_query(&Route::KioskSearch, &q).ok();
         })
@@ -402,12 +406,12 @@ fn results_panel(
 
     if let Some(resp) = &**results {
         let heading = match resp.search_type.as_deref() {
-            Some("fts")   => format!("{} results for "{}"", resp.total, active_q),
+            Some("fts")   => format!("{} results for \"{}\"", resp.total, active_q),
             Some("fuzzy") => format!(
-                "Showing approximate matches for "{}" ({} results)",
+                "Showing approximate matches for \"{}\" ({} results)",
                 active_q, resp.total
             ),
-            _ if !active_q.is_empty() => format!("No results for "{}"", active_q),
+            _ if !active_q.is_empty() => format!("No results for \"{}\"", active_q),
             _ => format!("{} articles", resp.total),
         };
 

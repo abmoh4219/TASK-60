@@ -60,6 +60,88 @@ fn fmt_size(bytes: i32) -> String {
     }
 }
 
+fn render_tab_bar(
+    can_approve:    bool,
+    action:         UseStateHandle<u8>,
+    on_load_audit:  Callback<MouseEvent>,
+) -> Html {
+    let tabs: &[(&str, u8)] = if can_approve {
+        &[("Info", 0), ("Review", 1), ("E-sign", 2), ("Audit", 3)]
+    } else {
+        &[("Info", 0), ("E-sign", 2), ("Audit", 3)]
+    };
+    tabs.iter().map(|(label, idx)| {
+        let idx = *idx;
+        let is_active = *action == idx;
+        let on_click = if idx == 3 {
+            on_load_audit.clone()
+        } else {
+            let action = action.clone();
+            Callback::from(move |_: MouseEvent| action.set(idx))
+        };
+        html! {
+            <button
+                class={if is_active {
+                    "px-3 py-2 text-xs font-medium text-indigo-700 \
+                     border-b-2 border-indigo-600 transition-colors"
+                } else {
+                    "px-3 py-2 text-xs font-medium text-slate-500 \
+                     border-b-2 border-transparent hover:text-slate-800 \
+                     transition-colors"
+                }}
+                onclick={on_click}>
+                { *label }
+            </button>
+        }
+    }).collect::<Html>()
+}
+
+fn render_pagination(
+    total:  i64,
+    page_v: i64,
+    page:   UseStateHandle<i64>,
+    reload: UseStateHandle<u8>,
+) -> Html {
+    let total_pages = (total + 19) / 20;
+    if total_pages <= 1 {
+        return html! {};
+    }
+    html! {
+        <div class="flex items-center justify-between px-4 py-3
+                    border-t border-slate-100 text-xs text-slate-500">
+            <span>{ format!("Page {page_v} / {total_pages}") }</span>
+            <div class="flex gap-2">
+                if page_v > 1 {
+                    <button
+                        class="hover:text-indigo-600 font-medium transition-colors"
+                        onclick={{
+                            let (page, reload) = (page.clone(), reload.clone());
+                            Callback::from(move |_: MouseEvent| {
+                                page.set(page_v - 1);
+                                reload.set(reload.wrapping_add(1));
+                            })
+                        }}>
+                        {"← Prev"}
+                    </button>
+                }
+                if page_v < total_pages {
+                    <button
+                        class="hover:text-indigo-600 font-medium transition-colors"
+                        onclick={{
+                            let (page, reload) = (page.clone(), reload.clone());
+                            Callback::from(move |_: MouseEvent| {
+                                page.set(page_v + 1);
+                                reload.set(reload.wrapping_add(1));
+                            })
+                        }}>
+                        {"Next →"}
+                    </button>
+                }
+            </div>
+        </div>
+    }
+}
+
 // ── Page component ─────────────────────────────────────────────────────────────
 
 #[function_component(OpsCredentialsPage)]
@@ -557,48 +639,7 @@ pub fn ops_credentials_page() -> Html {
                                     </tbody>
                                 </table>
                                 // Pagination
-                                {
-                                    let total_pages = (*total + 19) / 20;
-                                    if total_pages > 1 {
-                                        let page_v = *page;
-                                        html! {
-                                            <div class="flex items-center justify-between px-4 py-3
-                                                        border-t border-slate-100 text-xs text-slate-500">
-                                                <span>{ format!("Page {page_v} / {total_pages}") }</span>
-                                                <div class="flex gap-2">
-                                                    if page_v > 1 {
-                                                        <button
-                                                            class="hover:text-indigo-600 font-medium transition-colors"
-                                                            onclick={{
-                                                                let (page, reload) = (page.clone(), reload.clone());
-                                                                Callback::from(move |_: MouseEvent| {
-                                                                    page.set(page_v - 1);
-                                                                    reload.set(reload.wrapping_add(1));
-                                                                })
-                                                            }}>
-                                                            {"← Prev"}
-                                                        </button>
-                                                    }
-                                                    if page_v < total_pages {
-                                                        <button
-                                                            class="hover:text-indigo-600 font-medium transition-colors"
-                                                            onclick={{
-                                                                let (page, reload) = (page.clone(), reload.clone());
-                                                                Callback::from(move |_: MouseEvent| {
-                                                                    page.set(page_v + 1);
-                                                                    reload.set(reload.wrapping_add(1));
-                                                                })
-                                                            }}>
-                                                            {"Next →"}
-                                                        </button>
-                                                    }
-                                                </div>
-                                            </div>
-                                        }
-                                    } else {
-                                        html! {}
-                                    }
-                                }
+                                { render_pagination(*total, *page, page.clone(), reload.clone()) }
                             </div>
                         }
                     </div>
@@ -649,37 +690,7 @@ pub fn ops_credentials_page() -> Html {
 
                             // Tab bar
                             <div class="flex border-b border-slate-200/60 px-2 pt-1">
-                                {
-                                    let tabs: &[(&str, u8)] = if can_approve {
-                                        &[("Info", 0), ("Review", 1), ("E-sign", 2), ("Audit", 3)]
-                                    } else {
-                                        &[("Info", 0), ("E-sign", 2), ("Audit", 3)]
-                                    };
-                                    tabs.iter().map(|(label, idx)| {
-                                        let idx = *idx;
-                                        let is_active = *action == idx;
-                                        let on_click = if idx == 3 {
-                                            on_load_audit.clone()
-                                        } else {
-                                            let action = action.clone();
-                                            Callback::from(move |_: MouseEvent| action.set(idx))
-                                        };
-                                        html! {
-                                            <button
-                                                class={if is_active {
-                                                    "px-3 py-2 text-xs font-medium text-indigo-700 \
-                                                     border-b-2 border-indigo-600 transition-colors"
-                                                } else {
-                                                    "px-3 py-2 text-xs font-medium text-slate-500 \
-                                                     border-b-2 border-transparent hover:text-slate-800 \
-                                                     transition-colors"
-                                                }}
-                                                onclick={on_click}>
-                                                { *label }
-                                            </button>
-                                        }
-                                    }).collect::<Html>()
-                                }
+                                { render_tab_bar(can_approve, action.clone(), on_load_audit.clone()) }
                             </div>
 
                             // Tab content

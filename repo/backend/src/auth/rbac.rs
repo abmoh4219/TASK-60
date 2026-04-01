@@ -49,8 +49,15 @@ pub enum Permission {
     ViewAuditLog,
 }
 
-impl UserRole {
-    pub fn has(&self, perm: Permission) -> bool {
+/// Local extension trait — allows calling `.has(perm)` on `UserRole` from
+/// inside this module (including macro expansions) without defining an inherent
+/// impl on a type that belongs to the `shared` crate (which would be E0116).
+trait RoleExt {
+    fn has(&self, perm: Permission) -> bool;
+}
+
+impl RoleExt for UserRole {
+    fn has(&self, perm: Permission) -> bool {
         use Permission::*;
         match self {
             UserRole::Admin => true, // all permissions

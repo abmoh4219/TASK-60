@@ -83,7 +83,9 @@ type HmacSha256 = Hmac<Sha256>;
 
 /// Compute an HMAC-SHA-256 signature over `message` using `secret`.
 pub fn hmac_sign(secret: &str, message: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
+    // Qualify the trait explicitly: both `KeyInit` and `hmac::Mac` provide
+    // `new_from_slice` in newer digest/hmac versions, causing E0034 ambiguity.
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes())
         .expect("HMAC accepts any key length");
     mac.update(message.as_bytes());
     hex::encode(mac.finalize().into_bytes())

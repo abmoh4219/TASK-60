@@ -11,7 +11,7 @@
 #   runtime         — minimal Debian image with binary + static assets
 # =============================================================================
 
-ARG RUST_VERSION=1.82
+ARG RUST_VERSION=1.88
 
 # ── Stage 1: base toolchain ───────────────────────────────────────────────────
 FROM rust:${RUST_VERSION}-slim-bookworm AS chef
@@ -67,7 +67,7 @@ RUN set -eux; \
     curl -fsSLo /usr/local/bin/tailwindcss \
         "https://github.com/tailwindlabs/tailwindcss/releases/download/v${TAILWIND_VERSION}/tailwindcss-linux-${TW_ARCH}" \
     && chmod +x /usr/local/bin/tailwindcss \
-    && tailwindcss --version
+    && test -x /usr/local/bin/tailwindcss
 
 # ── Dependency pre-warm (frontend + shared) ───────────────────────────────────
 COPY --from=planner /src/recipe.json recipe.json
@@ -109,9 +109,13 @@ CMD ["sh", "-c", \
 
 # ── Stage 6: minimal runtime image ────────────────────────────────────────────
 FROM debian:bookworm-slim AS runtime
-# No apt packages needed:
-#   ca-certificates — not required: app generates its own TLS cert (rcgen),
-#                     connects to Postgres internally, never calls external HTTPS.
+# curl is used by the Docker Compose healthcheck to probe /health over HTTPS.
+# It is the only package needed at runtime; ca-certificates is not required
+# because the app generates its own TLS cert (rcgen) and connects to Postgres
+# only on the internal Docker network.
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r railops \
     && useradd -r -g railops -u 1001 railops

@@ -41,7 +41,9 @@ serde      = { workspace = true }
 serde_json = { workspace = true }
 
 # ── IDs & time (wasm-compatible) ──────────────────────────────────────────────
-uuid   = { workspace = true }
+# uuid's `js` feature enables getrandom's `wasm_js` backend so the `v4`
+# (random UUID generation) feature compiles for wasm32-unknown-unknown.
+uuid   = { workspace = true, features = ["js"] }
 chrono = { version = "0.4", features = ["serde", "wasmbind"] }
 
 # ── Error handling ────────────────────────────────────────────────────────────

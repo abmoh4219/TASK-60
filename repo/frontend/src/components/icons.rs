@@ -8,6 +8,7 @@ use yew::prelude::*;
 macro_rules! icon {
     ($name:ident, $path:literal) => {
         pub fn $name(cls: &str) -> Html {
+            let cls = cls.to_owned();
             html! {
                 <svg class={cls} xmlns="http://www.w3.org/2000/svg"
                      fill="none" viewBox="0 0 24 24"
