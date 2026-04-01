@@ -39,7 +39,8 @@ impl<'a> PassengerRepo<'a> {
 
         let total: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM passengers
-             WHERE full_name ILIKE '%' || $1 || '%'
+             WHERE (full_name ILIKE '%' || $1 || '%'
+                    OR phone_last4 LIKE '%' || $1 || '%')
                AND pii_purged_at IS NULL",
         )
         .bind(query)
@@ -51,7 +52,8 @@ impl<'a> PassengerRepo<'a> {
             "SELECT id, full_name, phone_last4, created_at,
                     pii_purge_requested_at, pii_purged_at
              FROM passengers
-             WHERE full_name ILIKE '%' || $1 || '%'
+             WHERE (full_name ILIKE '%' || $1 || '%'
+                    OR phone_last4 LIKE '%' || $1 || '%')
                AND pii_purged_at IS NULL
              ORDER BY similarity(full_name, $1) DESC, full_name
              LIMIT $2 OFFSET $3",
@@ -342,6 +344,32 @@ impl<'a> OrderRepo<'a> {
             "UPDATE orders SET disruption_flag = TRUE, updated_at = NOW()
              WHERE id = $1",
         )
+        .bind(id)
+        .execute(self.0)
+        .await
+        .map_err(AppError::Database)?;
+        Ok(())
+    }
+
+    pub async fn set_rebooked(&self, id: Uuid, rebooked_to: Uuid) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE orders
+             SET status = 'rebooked', rebooked_to = $1, updated_at = NOW()
+             WHERE id = $2",
+        )
+        .bind(rebooked_to)
+        .bind(id)
+        .execute(self.0)
+        .await
+        .map_err(AppError::Database)?;
+        Ok(())
+    }
+
+    pub async fn set_rebooked_from(&self, id: Uuid, rebooked_from: Uuid) -> AppResult<()> {
+        sqlx::query(
+            "UPDATE orders SET rebooked_from = $1 WHERE id = $2",
+        )
+        .bind(rebooked_from)
         .bind(id)
         .execute(self.0)
         .await

@@ -98,6 +98,15 @@ pub struct FeeOverrideBody {
     pub reason:          String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RebookBody {
+    pub new_schedule_id:   Uuid,
+    pub new_seat_class_id: Option<Uuid>,
+    pub new_seat_number:   Option<String>,
+    pub new_fare_amount:   Option<Decimal>,
+    pub reason:            Option<String>,
+}
+
 fn default_page() -> i64 { 1 }
 fn default_per_page() -> i64 { 20 }
 
@@ -539,6 +548,82 @@ pub async fn flag_disruption(
         "flag_disruption", None, None, None).await;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
+}
+
+/// POST /orders/{id}/rebook — rebook a confirmed/cancelled order onto a new schedule.
+///
+/// Creates a new order for the same passenger on the target schedule,
+/// marks the original order as 'rebooked', and links them via rebooked_from/rebooked_to.
+pub async fn rebook_order(
+    pool:  web::Data<PgPool>,
+    path:  web::Path<Uuid>,
+    body:  web::Json<RebookBody>,
+    auth:  RequireManageOrders,
+) -> AppResult<HttpResponse> {
+    let id = path.into_inner();
+    let order = OrderRepo::new(&pool)
+        .find_by_id(id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Order".into()))?;
+
+    if !matches!(order.status.as_str(), "confirmed" | "cancelled") {
+        return Err(AppError::Validation(format!(
+            "Only confirmed or cancelled orders can be rebooked (current: '{}')", order.status
+        )));
+    }
+
+    // Create a new order on the target schedule
+    let new = NewOrder {
+        passenger_id:  order.passenger_id,
+        schedule_id:   body.new_schedule_id,
+        seat_class_id: body.new_seat_class_id.unwrap_or(order.seat_class_id),
+        seat_number:   body.new_seat_number.clone(),
+        fare_amount:   body.new_fare_amount.unwrap_or(order.fare_amount),
+        created_by:    Some(auth.id),
+    };
+    let (new_id, new_number) = OrderRepo::new(&pool).create(&new).await?;
+
+    // Mark original as rebooked and link
+    OrderRepo::new(&pool).set_rebooked(id, new_id).await?;
+    // Link new order back to original
+    OrderRepo::new(&pool).set_rebooked_from(new_id, id).await?;
+
+    // Events on original
+    OrderEventRepo::new(&pool).insert(&NewOrderEvent {
+        order_id:     id,
+        event_type:   "rebooked".into(),
+        performed_by: Some(auth.id),
+        reason:       body.reason.clone(),
+        data:         Some(json!({
+            "rebooked_to":      new_id,
+            "new_order_number": &new_number,
+            "new_schedule_id":  body.new_schedule_id,
+        })),
+    }).await?;
+
+    // Events on new order
+    OrderEventRepo::new(&pool).insert(&NewOrderEvent {
+        order_id:     new_id,
+        event_type:   "created".into(),
+        performed_by: Some(auth.id),
+        reason:       Some("Rebooked from original order".into()),
+        data:         Some(json!({ "rebooked_from": id })),
+    }).await?;
+
+    write_audit(&pool, "order_rebooked", "orders", Some(id), Some(auth.id),
+        "rebook_order", None,
+        Some(json!({
+            "original_order": id,
+            "new_order_id": new_id,
+            "new_order_number": &new_number,
+        })), None,
+    ).await;
+
+    Ok(HttpResponse::Ok().json(json!({
+        "ok": true,
+        "new_order_id": new_id,
+        "new_order_number": new_number,
+    })))
 }
 
 pub async fn list_order_events(

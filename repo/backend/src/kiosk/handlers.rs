@@ -24,17 +24,20 @@ pub struct SearchParams {
     pub q:        Option<String>,
     pub category: Option<String>,
     pub tag:      Option<String>,
+    pub city:     Option<String>,
     pub page:     Option<i64>,
     pub per_page: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ArchiveParams {
-    pub year:     Option<i32>,
-    pub month:    Option<i32>,
-    pub category: Option<String>,
-    pub page:     Option<i64>,
-    pub per_page: Option<i64>,
+    pub year:       Option<i32>,
+    pub month:      Option<i32>,
+    pub day:        Option<i32>,
+    pub category:   Option<String>,
+    pub route_code: Option<String>,
+    pub page:       Option<i64>,
+    pub per_page:   Option<i64>,
 }
 
 // ── Response structs ──────────────────────────────────────────────────────────
@@ -83,6 +86,7 @@ pub async fn list_content(
     let q        = params.q.as_deref().filter(|s| !s.is_empty());
     let category = params.category.as_deref().filter(|s| !s.is_empty());
     let tag      = params.tag.as_deref().filter(|s| !s.is_empty());
+    let city     = params.city.as_deref().filter(|s| !s.is_empty());
 
     // ── Try full-text search ──────────────────────────────────────────────
     if let Some(query) = q {
@@ -178,9 +182,10 @@ pub async fn list_content(
            AND ($1::TEXT IS NULL OR category = $1)
            AND ($2::TEXT IS NULL OR EXISTS (
                    SELECT 1 FROM content_tags ct
-                   WHERE ct.content_id = content_pages.id AND ct.tag = $2))",
+                   WHERE ct.content_id = content_pages.id AND ct.tag = $2))
+           AND ($3::TEXT IS NULL OR city ILIKE '%' || $3 || '%')",
     )
-    .bind(category).bind(tag)
+    .bind(category).bind(tag).bind(city)
     .fetch_one(pool.get_ref())
     .await
     .map_err(AppError::Database)?;
@@ -194,10 +199,11 @@ pub async fn list_content(
            AND ($2::TEXT IS NULL OR EXISTS (
                    SELECT 1 FROM content_tags ct
                    WHERE ct.content_id = content_pages.id AND ct.tag = $2))
+           AND ($3::TEXT IS NULL OR city ILIKE '%' || $3 || '%')
          ORDER BY updated_at DESC
-         LIMIT $3 OFFSET $4",
+         LIMIT $4 OFFSET $5",
     )
-    .bind(category).bind(tag)
+    .bind(category).bind(tag).bind(city)
     .bind(per_page).bind(offset)
     .fetch_all(pool.get_ref())
     .await
@@ -285,39 +291,47 @@ pub async fn get_archive(
     params: web::Query<ArchiveParams>,
 ) -> AppResult<HttpResponse> {
     let category = params.category.as_deref().filter(|s| !s.is_empty());
+    let route_code = params.route_code.as_deref().filter(|s| !s.is_empty());
 
     // If year + month provided, return paginated article list.
     if let (Some(year), Some(month)) = (params.year, params.month) {
         let per_page = params.per_page.unwrap_or(20).clamp(1, 50);
         let page     = params.page.unwrap_or(1).max(1);
         let offset   = (page - 1) * per_page;
+        let day      = params.day;
 
         let total: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM content_pages
-             WHERE is_published = TRUE
-               AND publish_date IS NOT NULL
-               AND EXTRACT(YEAR  FROM publish_date)::integer = $1
-               AND EXTRACT(MONTH FROM publish_date)::integer = $2
-               AND ($3::TEXT IS NULL OR category = $3)",
-        )
-        .bind(year).bind(month).bind(category)
-        .fetch_one(pool.get_ref())
-        .await
-        .map_err(AppError::Database)?;
-
-        let items: Vec<ContentSummary> = sqlx::query_as(
-            "SELECT id, slug, title, category, route_id, is_published,
-                    quality_score, publish_date, updated_at
-             FROM content_pages
+             LEFT JOIN routes r ON r.id = content_pages.route_id
              WHERE is_published = TRUE
                AND publish_date IS NOT NULL
                AND EXTRACT(YEAR  FROM publish_date)::integer = $1
                AND EXTRACT(MONTH FROM publish_date)::integer = $2
                AND ($3::TEXT IS NULL OR category = $3)
-             ORDER BY publish_date DESC, updated_at DESC
-             LIMIT $4 OFFSET $5",
+               AND ($4::INTEGER IS NULL OR EXTRACT(DAY FROM publish_date)::integer = $4)
+               AND ($5::TEXT IS NULL OR r.route_code = $5)",
         )
-        .bind(year).bind(month).bind(category)
+        .bind(year).bind(month).bind(category).bind(day).bind(route_code)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(AppError::Database)?;
+
+        let items: Vec<ContentSummary> = sqlx::query_as(
+            "SELECT cp.id, cp.slug, cp.title, cp.category, cp.route_id, cp.is_published,
+                    cp.quality_score, cp.publish_date, cp.updated_at
+             FROM content_pages cp
+             LEFT JOIN routes r ON r.id = cp.route_id
+             WHERE cp.is_published = TRUE
+               AND cp.publish_date IS NOT NULL
+               AND EXTRACT(YEAR  FROM cp.publish_date)::integer = $1
+               AND EXTRACT(MONTH FROM cp.publish_date)::integer = $2
+               AND ($3::TEXT IS NULL OR cp.category = $3)
+               AND ($4::INTEGER IS NULL OR EXTRACT(DAY FROM cp.publish_date)::integer = $4)
+               AND ($5::TEXT IS NULL OR r.route_code = $5)
+             ORDER BY cp.publish_date DESC, cp.updated_at DESC
+             LIMIT $6 OFFSET $7",
+        )
+        .bind(year).bind(month).bind(category).bind(day).bind(route_code)
         .bind(per_page).bind(offset)
         .fetch_all(pool.get_ref())
         .await

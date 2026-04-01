@@ -77,7 +77,7 @@ docker compose up --build
 | `rules`        | Rules engine + CRUD handlers                            |
 | `crawl`        | Crawl engine + pipeline + handlers                      |
 | `staffing`     | Staffing handlers + matching algorithm                  |
-| `credentials`  | Document upload + review + e-signature workflow         |
+| `credentials`  | Document upload (AES-encrypted at rest) + review + e-signature + watermark |
 
 ---
 
@@ -173,9 +173,19 @@ POST /orders/{id}/hold ──► held  (expires after hold.ttl_minutes)
 POST /orders/{id}/confirm ──► confirmed
 POST /orders/{id}/cancel  ──► cancelled
 POST /orders/{id}/refund  ──► refunded  (RulesEngine evaluates max_amount)
+POST /orders/{id}/rebook  ──► rebooked  (creates new order, links both)
 ```
 
 Every state transition appends an `OrderEvent` and writes an audit log entry.
+
+### Background Jobs
+
+Two background tasks run alongside the web server:
+
+- **Hold expiry** (30 s tick): cancels held orders whose `hold_expires_at` has
+  passed.  Each expiry produces an `order_event` and an audit log entry.
+- **PII purge** (5 min tick): purges encrypted PII for passengers who requested
+  deletion and whose most recent trip completed > 30 days ago.
 
 ---
 

@@ -26,6 +26,7 @@ use actix_files::Files;
 use actix_web::{middleware, web, App, HttpResponse, HttpServer};
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
+use std::time::Duration;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -74,6 +75,95 @@ async fn main() -> Result<()> {
     let (trigger_handle, trigger_rx) = TriggerHandle::new();
     CrawlEngine::new(pool.clone(), shared::rules::CRAWL_MAX_WORKERS).spawn(trigger_rx);
     info!("CrawlEngine started in background");
+
+    // ── Background jobs: hold-expiry + PII-purge ──────────────────────────────
+    {
+        let pool_bg = pool.clone();
+        tokio::spawn(async move {
+            use crate::domain::orders::repo::{OrderRepo, OrderEventRepo, PassengerRepo};
+            use crate::domain::orders::models::NewOrderEvent;
+            use crate::db::audit::write_audit;
+            use serde_json::json;
+
+            let mut hold_tick = tokio::time::interval(Duration::from_secs(30));
+            hold_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            let mut purge_tick = tokio::time::interval(Duration::from_secs(300));
+            purge_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+            loop {
+                tokio::select! {
+                    _ = hold_tick.tick() => {
+                        // Expire held orders past their hold_expires_at
+                        // First get the IDs that will be expired so we can log events
+                        let expired_ids: Vec<(uuid::Uuid,)> = sqlx::query_as(
+                            "SELECT id FROM orders WHERE status = 'held' AND hold_expires_at < NOW()"
+                        )
+                        .fetch_all(&pool_bg)
+                        .await
+                        .unwrap_or_default();
+
+                        if !expired_ids.is_empty() {
+                            match OrderRepo::new(&pool_bg).expire_holds().await {
+                                Ok(n) if n > 0 => {
+                                    for (oid,) in &expired_ids {
+                                        let _ = OrderEventRepo::new(&pool_bg).insert(&NewOrderEvent {
+                                            order_id: *oid,
+                                            event_type: "hold_expired".into(),
+                                            performed_by: None,
+                                            reason: Some("Automatic hold expiry after TTL".into()),
+                                            data: None,
+                                        }).await;
+                                        write_audit(
+                                            &pool_bg, "hold_expired", "orders", Some(*oid),
+                                            None, "auto_expire", None,
+                                            Some(json!({"reason": "hold TTL exceeded"})), None,
+                                        ).await;
+                                    }
+                                    info!(count = n, "Auto-expired held orders");
+                                }
+                                Ok(_) => {}
+                                Err(e) => warn!(error = %e, "Hold expiry check failed"),
+                            }
+                        }
+                    }
+                    _ = purge_tick.tick() => {
+                        // PII purge: find passengers with purge requested, whose most
+                        // recent order departure is > 30 days ago
+                        let eligible: Vec<(uuid::Uuid,)> = sqlx::query_as(
+                            "SELECT p.id FROM passengers p
+                             WHERE p.pii_purge_requested_at IS NOT NULL
+                               AND p.pii_purged_at IS NULL
+                               AND NOT EXISTS (
+                                   SELECT 1 FROM orders o
+                                   JOIN schedules s ON s.id = o.schedule_id
+                                   WHERE o.passenger_id = p.id
+                                     AND s.departure_time > NOW() - INTERVAL '30 days'
+                               )"
+                        )
+                        .fetch_all(&pool_bg)
+                        .await
+                        .unwrap_or_default();
+
+                        for (pid,) in &eligible {
+                            match PassengerRepo::new(&pool_bg).execute_pii_purge(*pid).await {
+                                Ok(()) => {
+                                    write_audit(
+                                        &pool_bg, "pii_purged", "passengers", Some(*pid),
+                                        None, "auto_purge", None,
+                                        Some(json!({"reason": "30 days post-trip + purge request"})),
+                                        None,
+                                    ).await;
+                                    info!(passenger_id = %pid, "PII purge executed");
+                                }
+                                Err(e) => warn!(passenger_id = %pid, error = %e, "PII purge failed"),
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        info!("Background jobs started (hold-expiry + PII-purge)");
+    }
 
     // ── Shared app state ───────────────────────────────────────────────────────
     let pool_data    = web::Data::new(pool);
@@ -185,6 +275,8 @@ async fn main() -> Result<()> {
                         web::post().to(ops_orders::apply_fee_override))
                     .route("/orders/{id}/disruption",
                         web::post().to(ops_orders::flag_disruption))
+                    .route("/orders/{id}/rebook",
+                        web::post().to(ops_orders::rebook_order))
                     .route("/orders/{id}/events",
                         web::get().to(ops_orders::list_order_events)),
             )

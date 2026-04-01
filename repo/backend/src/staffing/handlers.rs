@@ -464,11 +464,16 @@ pub async fn list_subscriptions(
     pool: web::Data<sqlx::PgPool>,
     auth: RequireViewContractors,
 ) -> AppResult<HttpResponse> {
-    // Returns subscriptions held by the current user acting as a dispatcher.
-    let subs = SubscriptionRepo::new(&pool)
+    // Returns subscriptions held by the current user as both dispatcher and contractor.
+    let dispatcher_subs = SubscriptionRepo::new(&pool)
         .list_for_subscriber("dispatcher", auth.id)
         .await?;
-    Ok(HttpResponse::Ok().json(subs))
+    let contractor_subs = SubscriptionRepo::new(&pool)
+        .list_for_subscriber("contractor", auth.id)
+        .await?;
+    let mut all = dispatcher_subs;
+    all.extend(contractor_subs);
+    Ok(HttpResponse::Ok().json(all))
 }
 
 pub async fn subscribe(

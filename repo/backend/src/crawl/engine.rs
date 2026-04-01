@@ -182,6 +182,12 @@ async fn run_task(pool: PgPool, task: CrawlTask) {
 
         pages_fetched += 1;
 
+        // Per-source rate limiting: sleep to enforce configured rate_limit_rps
+        let delay_ms = (1000.0 / source.rate_limit_rps.to_string().parse::<f64>().unwrap_or(2.0)) as u64;
+        if delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+        }
+
         if raw_items.is_empty() { cursor = None; break; }
 
         let mut page_ingested    = 0i32;
@@ -254,6 +260,24 @@ async fn run_task(pool: PgPool, task: CrawlTask) {
                     // Auto-publish if quality is sufficient.
                     if q.is_publishable() {
                         let _ = ContentRepo::new(&pool).publish(content_id).await;
+                    }
+
+                    // Sampling-based review: mark ~2% of items for manual review
+                    let sample_pct: f64 = crate::domain::rules::repo::BusinessRuleRepo::new(&pool)
+                        .get_value("sample_review_pct", "0.02")
+                        .await
+                        .parse()
+                        .unwrap_or(0.02);
+                    if rand::random::<f64>() < sample_pct {
+                        let _ = sqlx::query(
+                            "UPDATE quality_logs SET sampled_for_review = TRUE
+                             WHERE content_id = $1
+                             ORDER BY created_at DESC LIMIT 1"
+                        )
+                        .bind(content_id)
+                        .execute(&pool)
+                        .await;
+                        info!(content_id = %content_id, "Sampled for review");
                     }
 
                     page_ingested += 1;

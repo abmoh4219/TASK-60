@@ -61,6 +61,7 @@ pub struct ReviewBody {
 pub struct EsignBody {
     pub signer_name: String,
     pub signed_date: String, // YYYY-MM-DD
+    pub signature_data: Option<String>, // base64 encoded drawn signature
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,6 +70,7 @@ pub struct CreateEsignBody {
     pub entity_id:    Uuid,
     pub signer_name:  String,
     pub signed_date:  String,
+    pub signature_data: Option<String>,
 }
 
 // ── Credential handlers ────────────────────────────────────────────────────────
@@ -110,12 +112,22 @@ pub async fn get_credential(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Credential {id}")))?;
 
-    // Log access.
+    // Log access with watermark info.
+    let watermark = format!(
+        "Viewed by {} (user:{}) at {}",
+        auth.full_name.as_deref().unwrap_or(&auth.username),
+        auth.id,
+        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"),
+    );
     CredAuditRepo::new(&pool)
-        .insert(id, "viewed", Some(auth.id), auth.full_name.as_deref(), None, None)
+        .insert(id, "viewed", Some(auth.id), auth.full_name.as_deref(), None,
+            Some(json!({"watermark": &watermark})))
         .await?;
 
-    Ok(HttpResponse::Ok().json(&cred))
+    Ok(HttpResponse::Ok().json(json!({
+        "credential": &cred,
+        "watermark": &watermark,
+    })))
 }
 
 /// POST /credentials — upload a credential document via multipart form.
@@ -271,7 +283,9 @@ pub async fn upload_credential(
     let relative_path  = format!("contractors/{contractor_id}/{stored_name}");
     let absolute_path  = format!("{upload_dir}/{relative_path}");
 
-    tokio::fs::write(&absolute_path, &file_bytes).await?;
+    // Encrypt file at rest using AES-256-GCM
+    let encrypted = encrypt_file_bytes(&file_bytes, &upload_secret())?;
+    tokio::fs::write(&absolute_path, &encrypted).await?;
 
     // ── Create credential record ───────────────────────────────────────────
     let cmd = CreateCredential {
@@ -393,12 +407,24 @@ pub async fn esign_credential(
     let signed_date = NaiveDate::parse_from_str(&body.signed_date, "%Y-%m-%d")
         .map_err(|_| AppError::Validation("signed_date must be YYYY-MM-DD".into()))?;
 
+    // Save drawn signature if provided
+    let sig_path = if let Some(ref sig_data) = body.signature_data {
+        if !sig_data.is_empty() {
+            let upload_dir = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "/app/uploads".to_owned());
+            let sig_dir = format!("{upload_dir}/signatures");
+            let _ = tokio::fs::create_dir_all(&sig_dir).await;
+            let sig_file = format!("{sig_dir}/{id}_{}.svg", chrono::Utc::now().timestamp());
+            let _ = tokio::fs::write(&sig_file, sig_data.as_bytes()).await;
+            Some(format!("signatures/{id}_{}.svg", chrono::Utc::now().timestamp()))
+        } else { None }
+    } else { None };
+
     let cmd = CreateEsignature {
         entity_type:          "credential".to_owned(),
         entity_id:            id,
         signer_name:          body.signer_name.trim().to_owned(),
         signed_date,
-        signature_image_path: None,
+        signature_image_path: sig_path,
     };
     let sig_id = EsignatureRepo::new(&pool).create(&cmd).await?;
 
@@ -483,12 +509,24 @@ pub async fn create_esignature(
     let signed_date = NaiveDate::parse_from_str(&body.signed_date, "%Y-%m-%d")
         .map_err(|_| AppError::Validation("signed_date must be YYYY-MM-DD".into()))?;
 
+    let sig_path = if let Some(ref sig_data) = body.signature_data {
+        if !sig_data.is_empty() {
+            let upload_dir = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "/app/uploads".to_owned());
+            let sig_dir = format!("{upload_dir}/signatures");
+            let _ = tokio::fs::create_dir_all(&sig_dir).await;
+            let ts = chrono::Utc::now().timestamp();
+            let sig_file = format!("{sig_dir}/{}_{ts}.svg", body.entity_id);
+            let _ = tokio::fs::write(&sig_file, sig_data.as_bytes()).await;
+            Some(format!("signatures/{}_{ts}.svg", body.entity_id))
+        } else { None }
+    } else { None };
+
     let cmd = CreateEsignature {
         entity_type:          body.entity_type.clone(),
         entity_id:            body.entity_id,
         signer_name:          body.signer_name.trim().to_owned(),
         signed_date,
-        signature_image_path: None,
+        signature_image_path: sig_path,
     };
     let sig_id = EsignatureRepo::new(&pool).create(&cmd).await?;
 
@@ -522,4 +560,38 @@ async fn read_text_field(field: &mut actix_multipart::Field) -> AppResult<String
     }
     String::from_utf8(buf.to_vec())
         .map_err(|_| AppError::Validation("Form field is not valid UTF-8".into()))
+}
+
+/// Encrypt raw bytes with AES-256-GCM. Returns nonce (12B) || ciphertext.
+fn encrypt_file_bytes(data: &[u8], secret: &str) -> Result<Vec<u8>, AppError> {
+    use aes_gcm::{aead::{Aead, AeadCore, KeyInit, OsRng}, Aes256Gcm, Nonce};
+    let key_bytes = crate::crypto::derive_aes_key(secret);
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("AES key error: {e}")))?;
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher.encrypt(&nonce, data)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("AES encrypt error: {e}")))?;
+    let mut out = nonce.to_vec();
+    out.extend(ciphertext);
+    Ok(out)
+}
+
+/// Decrypt bytes produced by encrypt_file_bytes.
+fn decrypt_file_bytes(blob: &[u8], secret: &str) -> Result<Vec<u8>, AppError> {
+    use aes_gcm::{aead::{Aead, KeyInit}, Aes256Gcm, Nonce};
+    if blob.len() < 12 {
+        return Err(AppError::Validation("Encrypted blob too short".into()));
+    }
+    let (nonce_bytes, ciphertext) = blob.split_at(12);
+    let key_bytes = crate::crypto::derive_aes_key(secret);
+    let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("AES key error: {e}")))?;
+    let nonce = Nonce::from_slice(nonce_bytes);
+    cipher.decrypt(nonce, ciphertext)
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("AES decrypt error: {e}")))
+}
+
+fn upload_secret() -> String {
+    std::env::var("SESSION_SECRET")
+        .unwrap_or_else(|_| "change_this_to_a_random_64_char_string_before_going_live_!!1".to_owned())
 }

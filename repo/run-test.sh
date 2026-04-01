@@ -14,7 +14,7 @@
 #      (db + app; skipped automatically if already running).
 #   2. Polls https://localhost:8443/health until the backend is healthy.
 #   3. Runs the three test suites inside the Docker tester container:
-#        [1/3] Backend unit tests    (cargo test --lib -p backend)
+#        [1/3] Backend unit tests    (cargo test --bin backend -p backend)
 #        [2/3] Shared utility tests  (cargo test -p shared)
 #        [3/3] API integration tests (cargo test --test api_integration_test)
 #      The tester container connects to the app via the internal Docker network

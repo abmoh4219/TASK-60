@@ -126,6 +126,7 @@ Full-text search over published content.
 | `q`        | string | Search query (FTS + pg_trgm fallback)    |
 | `category` | string | Filter: `fares`, `delays`, `baggage`, etc.|
 | `tag`      | string | Filter by tag                            |
+| `city`     | string | Filter by city (ILIKE match)             |
 | `page`     | int    | Page number (default 1)                  |
 | `per_page` | int    | Items per page (default 20, max 100)     |
 
@@ -188,10 +189,12 @@ Archive index or month articles.
 
 | Param      | Type   | Description                              |
 |------------|--------|------------------------------------------|
-| `year`     | int    | Year filter (required for month view)    |
-| `month`    | int    | Month 1–12 (required for month view)     |
-| `category` | string | Optional category filter                 |
-| `page`     | int    | Page (for month view)                    |
+| `year`       | int    | Year filter (required for month view)    |
+| `month`      | int    | Month 1–12 (required for month view)     |
+| `day`        | int    | Day 1–31 (optional, day-level filter)    |
+| `category`   | string | Optional category filter                 |
+| `route_code` | string | Filter by route code (e.g. `EW-001`)     |
+| `page`       | int    | Page (for month view)                    |
 
 Without `year`+`month` → returns index: `{ "entries": [{ "year", "month", "count" }] }`
 With `year`+`month` → returns paginated articles for that month.
@@ -429,6 +432,35 @@ Requires: `OverrideFees`
 
 Requires: `ManageOrders`
 Flags the order's associated schedule as disrupted.
+
+---
+
+#### `POST /api/v1/ops/orders/{id}/rebook`
+
+Requires: `ManageOrders`
+
+Creates a new order for the same passenger on a different schedule, marks
+the original order as `rebooked`, and links both orders.
+
+**Request:**
+```json
+{
+  "new_schedule_id":   "uuid",
+  "new_seat_class_id": "uuid (optional, defaults to original)",
+  "new_seat_number":   "14A (optional)",
+  "new_fare_amount":   "89.50 (optional, defaults to original fare)",
+  "reason":            "Passenger requested later departure"
+}
+```
+
+**Response 200:**
+```json
+{
+  "ok":               true,
+  "new_order_id":     "uuid",
+  "new_order_number": "ORD-000012"
+}
+```
 
 ---
 

@@ -121,7 +121,7 @@ services:
         echo '╚══════════════════════════════════════════════╝';
         echo '';
         echo '── [1/3] Backend unit tests ──────────────────────';
-        cargo test --lib -p backend -- --nocapture;
+        cargo test --bin backend -p backend -- --nocapture;
         echo '';
         echo '── [2/3] Shared / frontend utility tests ─────────';
         cargo test -p shared -- --nocapture;

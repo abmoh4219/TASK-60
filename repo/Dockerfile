@@ -103,7 +103,7 @@ WORKDIR /src
 
 # Default command: full test suite (overridden by docker-compose).
 CMD ["sh", "-c", \
-    "cargo test --lib -p backend -- --nocapture && \
+    "cargo test --bin backend -p backend -- --nocapture && \
      cargo test -p shared -- --nocapture && \
      cargo test --test api_integration_test -p backend -- --nocapture"]
 

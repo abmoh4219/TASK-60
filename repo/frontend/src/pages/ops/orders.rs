@@ -81,7 +81,7 @@ pub fn ops_orders_page() -> Html {
             if tab == 0 {
                 loading.set(true);
                 spawn_local(async move {
-                    let result = if !search.is_empty() && search.starts_with("RO") {
+                    let result = if !search.is_empty() && search.starts_with("ORD-") {
                         ops_api::find_order_by_number(&token, &search).await
                             .map(|o| Page { items: vec![o], total: 1, page: 1, per_page: 20, total_pages: 1 })
                     } else {
