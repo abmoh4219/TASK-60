@@ -5,7 +5,7 @@
 #   db      — PostgreSQL 16 (persistent data volume)
 #   app     — Actix-web backend + Yew frontend (persistent uploads + certs volumes)
 #
-# Services (test profile — started by run-test.sh):
+# Services (test profile — run via `docker compose --profile test run --rm tester`):
 #   tester  — cargo test runner; targets the live `app` service at https://localhost:8443
 #
 # No .env file is used.  All configuration is declared inline below.

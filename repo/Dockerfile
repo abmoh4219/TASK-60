@@ -43,14 +43,27 @@ FROM chef AS frontend-builder
 # WASM compilation target
 RUN rustup target add wasm32-unknown-unknown
 
-# trunk: Yew asset bundler (downloads wasm-bindgen-cli automatically)
-RUN cargo install trunk --locked
-
-# Install curl + CA certificates to download the Tailwind standalone binary.
-# This is a build-time-only dependency; the runtime image has no internet access.
+# Install curl + CA certificates to download prebuilt binaries.
+# These are build-time-only dependencies; the runtime image has no internet access.
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# ── trunk: Yew asset bundler ──────────────────────────────────────────────────
+# Download the prebuilt trunk binary to avoid OOM-killing from compiling it.
+ARG TRUNK_VERSION=0.21.14
+RUN set -eux; \
+    ARCH=$(uname -m); \
+    case "$ARCH" in \
+        x86_64)  TRUNK_ARCH=x86_64-unknown-linux-gnu   ;; \
+        aarch64) TRUNK_ARCH=aarch64-unknown-linux-gnu  ;; \
+        *) echo "Unsupported CPU architecture: $ARCH" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL \
+        "https://github.com/thedodd/trunk/releases/download/v${TRUNK_VERSION}/trunk-${TRUNK_ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin/ \
+    && chmod +x /usr/local/bin/trunk \
+    && trunk --version
 
 # ── Tailwind CSS standalone CLI ───────────────────────────────────────────────
 # Single self-contained binary — no Node.js required.

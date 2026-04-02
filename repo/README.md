@@ -63,19 +63,27 @@ See [`docs/design.md`](docs/design.md) for architecture and security details.
 
 Only Docker is required — no Rust, Node, or other host tooling needed.
 
+**Step 1 — start the stack** (skip if already running):
+
 ```bash
-./run-test.sh
+docker compose up --build -d
 ```
 
-This script:
-1. Starts the full stack with `docker compose up -d --build` (if not already running).
-2. Waits for the backend health endpoint to be ready.
-3. Runs all three test suites **inside the Docker tester container**:
-   - **Backend unit tests** — crypto, crawl pipeline (no DB required)
-   - **Shared utility tests** — `QualityScore`, `PaginationParams`, `mask_phone`
-   - **API integration tests** — live HTTP against the real PostgreSQL database
+**Step 2 — run the test suite** (streams output directly to your terminal):
+
+```bash
+docker compose --profile test run --rm tester
+```
+
+This runs all three test suites inside the Docker tester container against the live PostgreSQL database:
+
+- **Backend unit tests** — crypto, crawl pipeline (no DB required)
+- **Shared utility tests** — `QualityScore`, `PaginationParams`, `mask_phone`
+- **API integration tests** — live HTTP against the real PostgreSQL database
 
 All test output is printed to stdout (`--nocapture`).
+
+A convenience wrapper `run_test.sh` is also available — it starts the stack, waits for the health endpoint, then executes the same `docker compose --profile test run --rm tester` command.
 
 ---
 

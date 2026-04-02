@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# run-test.sh — RailOps Docker-first test runner
+# run_test.sh — RailOps Docker-first test runner (convenience wrapper)
 #
 # Usage (from repo/):
-#   ./run-test.sh
+#   ./run_test.sh
 #
 # Prerequisites:
 #   • Docker (and docker compose) must be installed and running.
