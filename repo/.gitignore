@@ -46,3 +46,6 @@ logs/
 Thumbs.db
 .claude/
 .tmp/
+
+convert-ai-sessions.py
+session.jsonl
