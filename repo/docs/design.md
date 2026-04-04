@@ -97,7 +97,8 @@ RBAC is enforced in backend extractors (`RequireRole`, `RequireAdmin`, etc.) —
 ### Authentication
 - **Password hashing**: Argon2id (m=19456, t=2, p=1) via `argon2` 0.5
 - **Account lockout**: 5 consecutive failures locks account for 15 minutes
-- **Rate limiting**: In-memory DashMap; 5 failed logins per IP per 60 s → `429`; TTL eviction runs every 120 s in a background tokio task
+- **Account lockout**: 5 consecutive failed login attempts lock the account for 15 minutes (configurable via `max_failed_logins` and `lockout_minutes` business rules). Lockout is per-account, not per-IP.
+- **Authenticated rate limiting**: In-memory DashMap keyed by session token hash; configurable RPM (default 60) per session per 60 s window → `429`; TTL eviction runs every 120 s in a background tokio task
 
 ### Transport
 - TLS 1.3; certificate generated at startup by `rcgen` if absent

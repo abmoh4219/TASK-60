@@ -88,9 +88,15 @@ async fn main() -> Result<()> {
     seed_pending_passwords(&pool, &cfg.security.admin_seed_password).await?;
 
     // ── Crawl engine ───────────────────────────────────────────────────────────
+    // Read crawl_max_workers from business_rules at startup (runtime-configurable).
+    let crawl_max_workers: usize = crate::domain::rules::repo::BusinessRuleRepo::new(&pool)
+        .get_value("crawl_max_workers", &shared::rules::CRAWL_MAX_WORKERS.to_string())
+        .await
+        .parse()
+        .unwrap_or(shared::rules::CRAWL_MAX_WORKERS);
     let (trigger_handle, trigger_rx) = TriggerHandle::new();
-    CrawlEngine::new(pool.clone(), shared::rules::CRAWL_MAX_WORKERS).spawn(trigger_rx);
-    info!("CrawlEngine started in background");
+    CrawlEngine::new(pool.clone(), crawl_max_workers).spawn(trigger_rx);
+    info!(max_workers = crawl_max_workers, "CrawlEngine started in background");
 
     // ── Background jobs: hold-expiry + PII-purge ──────────────────────────────
     {

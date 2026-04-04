@@ -33,13 +33,53 @@ use uuid::Uuid;
 use shared::rules::MAX_UPLOAD_BYTES;
 
 use crate::auth::rbac::{RequireApproveCredentials, RequireViewCredentials};
-use crate::db::audit::{write_audit, write_audit_required};
+use crate::db::audit::write_audit_required;
 use crate::domain::credentials::{
     models::{CreateCredential, CreateEsignature},
     repo::{CredAuditRepo, CredentialRepo, EsignatureRepo},
 };
 use crate::domain::staffing::repo::ContractorRepo;
 use crate::error::{AppError, AppResult};
+
+// ── Object-level access control ───────────────────────────────────────────────
+
+/// Enforce object-scope authorization for credential document access.
+///
+/// Policy:
+/// - Admin / Dispatcher / OpsAgent: unrestricted access to all credentials
+/// - Users with a linked contractor profile: can only access credentials
+///   belonging to their own contractor record
+/// - Any other user with ViewCredentials: denied (no contractor link = no scope)
+///
+/// Returns `Ok(())` if access is permitted, or `Err(Forbidden)` otherwise.
+async fn enforce_credential_scope(
+    pool:           &sqlx::PgPool,
+    auth_user_id:   Uuid,
+    auth_role:      &shared::UserRole,
+    credential_contractor_id: Uuid,
+) -> AppResult<()> {
+    // Admin, Dispatcher, and OpsAgent have broad access.
+    if matches!(auth_role, shared::UserRole::Admin | shared::UserRole::Dispatcher | shared::UserRole::OpsAgent) {
+        return Ok(());
+    }
+
+    // For other roles: check if the user has a linked contractor profile
+    // and whether that contractor owns this credential.
+    let linked: Option<(Uuid,)> = sqlx::query_as(
+        "SELECT id FROM contractors WHERE user_id = $1"
+    )
+    .bind(auth_user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(AppError::Database)?;
+
+    match linked {
+        Some((contractor_id,)) if contractor_id == credential_contractor_id => Ok(()),
+        _ => Err(AppError::Forbidden(
+            "You do not have access to this credential document".into()
+        )),
+    }
+}
 
 // ── Request bodies ─────────────────────────────────────────────────────────────
 
@@ -111,6 +151,9 @@ pub async fn get_credential(
         .find_by_id(id)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Credential {id}")))?;
+
+    // Object-level scope check.
+    enforce_credential_scope(&pool, auth.id, &auth.role, cred.contractor_id).await?;
 
     // Log access with watermark info.
     let watermark = format!(
@@ -317,7 +360,7 @@ pub async fn upload_credential(
         )
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "credential_uploaded", "credential", Some(cred_id),
         Some(auth.id), "upload",
@@ -325,7 +368,7 @@ pub async fn upload_credential(
         Some(json!({ "document_type": &document_type, "contractor_id": contractor_id })),
         None,
     )
-    .await;
+    .await?;
 
     Ok(HttpResponse::Created().json(json!({ "id": cred_id })))
 }
@@ -383,14 +426,17 @@ pub async fn review_credential(
 pub async fn get_credential_audit(
     pool:  web::Data<sqlx::PgPool>,
     path:  web::Path<Uuid>,
-    _auth: RequireViewCredentials,
+    auth:  RequireViewCredentials,
 ) -> AppResult<HttpResponse> {
     let id = path.into_inner();
     // Verify credential exists.
-    CredentialRepo::new(&pool)
+    let cred = CredentialRepo::new(&pool)
         .find_by_id(id)
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Credential {id}")))?;
+
+    // Object-level scope check.
+    enforce_credential_scope(&pool, auth.id, &auth.role, cred.contractor_id).await?;
 
     let entries = CredAuditRepo::new(&pool).list_for_credential(id).await?;
     Ok(HttpResponse::Ok().json(entries))
@@ -446,7 +492,7 @@ pub async fn esign_credential(
         )
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "credential_esigned", "credential", Some(id),
         Some(auth.id), "esign",
@@ -454,7 +500,7 @@ pub async fn esign_credential(
         Some(json!({ "sig_id": sig_id, "signer_name": body.signer_name.trim() })),
         None,
     )
-    .await;
+    .await?;
 
     Ok(HttpResponse::Created().json(json!({ "id": sig_id })))
 }
@@ -466,7 +512,7 @@ pub async fn run_expiry_sweep(
     auth:  RequireApproveCredentials,
 ) -> AppResult<HttpResponse> {
     let count = CredentialRepo::new(&pool).expire_outdated().await?;
-    write_audit(
+    write_audit_required(
         &pool,
         "credential_expiry_sweep", "credential", None,
         Some(auth.id), "expire_sweep",
@@ -474,7 +520,7 @@ pub async fn run_expiry_sweep(
         Some(json!({ "expired_count": count })),
         None,
     )
-    .await;
+    .await?;
     Ok(HttpResponse::Ok().json(json!({ "ok": true, "expired_count": count })))
 }
 
@@ -577,7 +623,7 @@ pub async fn create_esignature(
     };
     let sig_id = EsignatureRepo::new(&pool).create(&cmd).await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "esignature_created", &body.entity_type, Some(body.entity_id),
         Some(auth.id), "esign",
@@ -585,7 +631,7 @@ pub async fn create_esignature(
         Some(json!({ "sig_id": sig_id, "signer_name": body.signer_name.trim() })),
         None,
     )
-    .await;
+    .await?;
 
     Ok(HttpResponse::Created().json(json!({ "id": sig_id })))
 }
@@ -682,6 +728,9 @@ pub async fn download_credential(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Credential {id}")))?;
 
+    // Object-level scope check.
+    enforce_credential_scope(&pool, auth.id, &auth.role, cred.contractor_id).await?;
+
     let upload_dir  = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "/app/uploads".to_owned());
     let abs_path    = format!("{upload_dir}/{}", cred.file_path);
     let encrypted   = tokio::fs::read(&abs_path).await
@@ -712,7 +761,7 @@ pub async fn download_credential(
         )
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "credential_downloaded", "credential", Some(id),
         Some(auth.id), "download",
@@ -720,7 +769,7 @@ pub async fn download_credential(
         Some(json!({ "watermark": &watermark_text })),
         None,
     )
-    .await;
+    .await?;
 
     // Sanitize filename for RFC 6266-safe Content-Disposition header:
     // strip directory separators and replace any character that is not

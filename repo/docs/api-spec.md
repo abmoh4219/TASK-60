@@ -36,8 +36,8 @@ Timestamps outside ±120 s of server time are rejected with `401`.
 { "token": "<session_token>", "role": "admin", "user_id": "<uuid>" }
 ```
 
-**Rate limiting**: 5 failures per IP per minute → `429 Too Many Requests`.  
-**Lockout**: 5 consecutive failures locks the account for 15 minutes.
+**Account lockout**: 5 consecutive failed login attempts lock the account for 15 minutes (returns `423 Locked`). Lockout is per-account, not per-IP. There is no IP-based login rate limiting; brute-force protection relies on account lockout.  
+**Authenticated rate limiting**: `429 Too Many Requests` applies to authenticated endpoints only (per-session token, configurable RPM).
 
 ---
 

@@ -12,7 +12,7 @@ use serde_json::json;
 use sqlx::PgPool;
 
 use crate::auth::rbac::RequireConfigureRules;
-use crate::db::audit::write_audit;
+use crate::db::audit::write_audit_required;
 use crate::domain::rules::repo::BusinessRuleRepo;
 use crate::error::{AppError, AppResult};
 
@@ -82,7 +82,7 @@ pub async fn update_rule(
         .set(&key, &value, Some(auth.id))
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "rule_updated",
         "business_rules",
@@ -92,7 +92,7 @@ pub async fn update_rule(
         Some(json!({ "rule_key": &key, "old_value": &old_value })),
         Some(json!({ "rule_key": &key, "new_value": &value })),
         None,
-    ).await;
+    ).await?;
 
     let updated = BusinessRuleRepo::new(&pool).get(&key).await?;
     Ok(HttpResponse::Ok().json(updated))

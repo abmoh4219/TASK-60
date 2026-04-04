@@ -17,7 +17,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::rbac::{RequireManageSchedules, RequireViewSchedules};
-use crate::db::audit::write_audit;
+use crate::db::audit::write_audit_required;
 use crate::domain::rail::{
     models::{ListSchedulesParams, UpdateScheduleStatus},
     repo::{InventoryRepo, RouteRepo, ScheduleRepo, SeatClassRepo},
@@ -137,7 +137,7 @@ pub async fn update_schedule_status(
         .update_status(id, &body.status, delay, body.platform.as_deref())
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "schedule_status_updated",
         "schedules",
@@ -147,7 +147,7 @@ pub async fn update_schedule_status(
         None,
         Some(json!({ "status": &body.status, "delay_minutes": delay, "platform": &body.platform })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
@@ -180,7 +180,7 @@ pub async fn correct_inventory(
         )
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "inventory_corrected",
         "inventory_snapshots",
@@ -195,7 +195,7 @@ pub async fn correct_inventory(
             "available_seats":  body.available_seats,
         })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }

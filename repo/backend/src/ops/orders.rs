@@ -31,7 +31,7 @@ use crate::auth::rbac::{
 use crate::rules::RulesEngine;
 use crate::config::AppConfig;
 use crate::crypto;
-use crate::db::audit::{write_audit, write_audit_required};
+use crate::db::audit::write_audit_required;
 use crate::domain::orders::{
     models::{CancelOrder, FeeOverride, ListOrdersParams, NewOrder, NewOrderEvent, NewPassenger},
     repo::{OrderEventRepo, OrderRepo, PassengerRepo},
@@ -171,7 +171,7 @@ pub async fn create_passenger(
     };
     let id = PassengerRepo::new(&pool).create(&new).await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "passenger_created",
         "passengers",
@@ -181,7 +181,7 @@ pub async fn create_passenger(
         None,
         Some(json!({ "full_name": &full_name })),
         None,
-    ).await;
+    ).await?;
 
     let passenger = PassengerRepo::new(&pool)
         .find_by_id(id)
@@ -202,7 +202,7 @@ pub async fn request_pii_purge(
 
     PassengerRepo::new(&pool).request_pii_purge(id).await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "pii_purge_requested",
         "passengers",
@@ -212,7 +212,7 @@ pub async fn request_pii_purge(
         None,
         None,
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
@@ -289,7 +289,7 @@ pub async fn create_order(
         data:         Some(json!({ "fare_amount": body.fare_amount })),
     }).await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "order_created",
         "orders",
@@ -303,7 +303,7 @@ pub async fn create_order(
             "schedule_id":  body.schedule_id,
         })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Created().json(json!({ "id": id, "order_number": order_number })))
 }
@@ -340,10 +340,10 @@ pub async fn hold_order(
         data:         Some(json!({ "hold_expires_at": expires_at })),
     }).await?;
 
-    write_audit(
+    write_audit_required(
         &pool, "order_held", "orders", Some(id), Some(auth.id),
         "hold_order", None, Some(json!({ "hold_expires_at": expires_at })), None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true, "hold_expires_at": expires_at })))
 }
@@ -369,8 +369,8 @@ pub async fn confirm_order(
         performed_by: Some(auth.id), reason: None, data: None,
     }).await?;
 
-    write_audit(&pool, "order_confirmed", "orders", Some(id), Some(auth.id),
-        "confirm_order", None, None, None).await;
+    write_audit_required(&pool, "order_confirmed", "orders", Some(id), Some(auth.id),
+        "confirm_order", None, None, None).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
@@ -552,8 +552,8 @@ pub async fn flag_disruption(
         performed_by: Some(auth.id), reason: None, data: None,
     }).await?;
 
-    write_audit(&pool, "disruption_flagged", "orders", Some(id), Some(auth.id),
-        "flag_disruption", None, None, None).await;
+    write_audit_required(&pool, "disruption_flagged", "orders", Some(id), Some(auth.id),
+        "flag_disruption", None, None, None).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
@@ -618,14 +618,14 @@ pub async fn rebook_order(
         data:         Some(json!({ "rebooked_from": id })),
     }).await?;
 
-    write_audit(&pool, "order_rebooked", "orders", Some(id), Some(auth.id),
+    write_audit_required(&pool, "order_rebooked", "orders", Some(id), Some(auth.id),
         "rebook_order", None,
         Some(json!({
             "original_order": id,
             "new_order_id": new_id,
             "new_order_number": &new_number,
         })), None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({
         "ok": true,

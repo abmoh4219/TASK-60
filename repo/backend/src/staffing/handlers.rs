@@ -31,7 +31,7 @@ use shared::PaginationParams;
 use crate::auth::rbac::{
     RequireManageContractors, RequireManageShifts, RequireViewContractors,
 };
-use crate::db::audit::write_audit;
+use crate::db::audit::write_audit_required;
 use crate::domain::staffing::{
     models::{CreateContractor, CreateShift, ListShiftsParams},
     repo::{AssignmentRepo, ContractorRepo, ShiftRepo, SubscriptionRepo},
@@ -165,13 +165,13 @@ pub async fn create_contractor(
         tags:            body.tags,
     };
     let id = ContractorRepo::new(&pool).create(&cmd).await?;
-    write_audit(
+    write_audit_required(
         &pool,
         "contractor_created", "contractor", Some(id),
         Some(auth.id), "create",
         None, Some(json!({ "full_name": &cmd.full_name })),
         None,
-    ).await;
+    ).await?;
     Ok(HttpResponse::Created().json(json!({ "id": id })))
 }
 
@@ -187,13 +187,13 @@ pub async fn set_contractor_active(
         .await?
         .ok_or_else(|| AppError::NotFound(format!("Contractor {id}")))?;
     ContractorRepo::new(&pool).set_active(id, body.active).await?;
-    write_audit(
+    write_audit_required(
         &pool,
         "contractor_active_changed", "contractor", Some(id),
         Some(auth.id), if body.active { "activate" } else { "deactivate" },
         None, Some(json!({ "active": body.active })),
         None,
-    ).await;
+    ).await?;
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
 
@@ -221,7 +221,7 @@ pub async fn add_availability(
             body.notes.as_deref(),
         )
         .await?;
-    write_audit(
+    write_audit_required(
         &pool,
         "availability_added", "contractor", Some(contractor_id),
         Some(auth.id), "add_availability",
@@ -232,7 +232,7 @@ pub async fn add_availability(
             "to":   body.available_to,
         })),
         None,
-    ).await;
+    ).await?;
     Ok(HttpResponse::Created().json(json!({ "id": avail_id })))
 }
 
@@ -301,7 +301,7 @@ pub async fn create_shift(
         created_by:    Some(auth.id),
     };
     let id = ShiftRepo::new(&pool).create(&cmd).await?;
-    write_audit(
+    write_audit_required(
         &pool,
         "shift_created", "shift", Some(id),
         Some(auth.id), "create",
@@ -312,7 +312,7 @@ pub async fn create_shift(
             "critical":  body.is_critical,
         })),
         None,
-    ).await;
+    ).await?;
     Ok(HttpResponse::Created().json(json!({ "id": id })))
 }
 
@@ -337,14 +337,14 @@ pub async fn update_shift_status(
     }
     let old_status = shift.status.clone();
     ShiftRepo::new(&pool).update_status(id, &body.status).await?;
-    write_audit(
+    write_audit_required(
         &pool,
         "shift_status_changed", "shift", Some(id),
         Some(auth.id), "update_status",
         Some(json!({ "status": old_status })),
         Some(json!({ "status": &body.status })),
         None,
-    ).await;
+    ).await?;
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
 
@@ -396,7 +396,7 @@ pub async fn propose_assignment(
         )
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "assignment_proposed", "shift_assignment", Some(assignment_id),
         Some(auth.id), "propose",
@@ -407,7 +407,7 @@ pub async fn propose_assignment(
             "score":         candidate.score.to_string(),
         })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Created().json(json!({
         "id":    assignment_id,
@@ -446,14 +446,14 @@ pub async fn respond_assignment(
             .await?;
     }
 
-    write_audit(
+    write_audit_required(
         &pool,
         "assignment_responded", "shift_assignment", Some(id),
         Some(auth.id), &body.status,
         Some(json!({ "status": "proposed" })),
         Some(json!({ "status": &body.status })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true, "status": &body.status })))
 }
