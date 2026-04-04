@@ -170,6 +170,20 @@ async fn main() -> Result<()> {
     let cfg_data     = web::Data::new(cfg.clone());
     let rate_limiter = web::Data::new(RateLimiter::new(cfg.security.rate_limit_rpm));
     let trigger_data = web::Data::new(trigger_handle);
+
+    // ── Rate-limiter eviction (prevents unbounded memory growth) ──────────────
+    {
+        let limiter_bg = rate_limiter.clone();
+        tokio::spawn(async move {
+            let mut evict_tick = tokio::time::interval(Duration::from_secs(120));
+            evict_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                evict_tick.tick().await;
+                limiter_bg.evict_expired();
+            }
+        });
+        info!("Rate-limiter eviction task started");
+    }
     let static_dir   = cfg.server.static_dir.clone();
     let bind_addr    = format!("{}:{}", cfg.server.host, cfg.server.port);
 
@@ -336,6 +350,8 @@ async fn main() -> Result<()> {
                         web::post().to(credentials_handlers::run_expiry_sweep))
                     .route("/{id}",
                         web::get().to(credentials_handlers::get_credential))
+                    .route("/{id}/download",
+                        web::get().to(credentials_handlers::download_credential))
                     .route("/{id}/review",
                         web::patch().to(credentials_handlers::review_credential))
                     .route("/{id}/audit",

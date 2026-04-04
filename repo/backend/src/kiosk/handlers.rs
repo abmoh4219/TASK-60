@@ -8,6 +8,7 @@
 //! | GET    | /content/:slug    | Full article + related content            |
 //! | GET    | /archive          | Archive index grouped by year & month     |
 //! | GET    | /categories       | Published article count per category     |
+//! | GET    | /tags             | Top tags for filter suggestions          |
 
 use actix_web::{web, HttpResponse};
 use serde::{Deserialize, Serialize};
@@ -21,12 +22,17 @@ use crate::error::{AppError, AppResult};
 
 #[derive(Debug, Deserialize)]
 pub struct SearchParams {
-    pub q:        Option<String>,
-    pub category: Option<String>,
-    pub tag:      Option<String>,
-    pub city:     Option<String>,
-    pub page:     Option<i64>,
-    pub per_page: Option<i64>,
+    pub q:              Option<String>,
+    pub category:       Option<String>,
+    pub tag:            Option<String>,
+    pub city:           Option<String>,
+    /// ISO-8601 timestamp lower bound for related-schedule departure time.
+    /// Content linked to routes with NO matching departure is excluded.
+    pub departure_from: Option<String>,
+    /// ISO-8601 timestamp upper bound for related-schedule departure time.
+    pub departure_to:   Option<String>,
+    pub page:           Option<i64>,
+    pub per_page:       Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -73,6 +79,27 @@ pub struct CategoryCount {
     pub count:    i64,
 }
 
+// ── Departure window SQL fragment ─────────────────────────────────────────────
+
+/// Returns the SQL snippet (with parameter placeholders at $from_param and
+/// $to_param) that filters content by route departure time window.
+///
+/// Articles with no route_id are always included (departure filter only applies
+/// to route-linked content).
+const DEPARTURE_FILTER_SQL: &str = "
+    AND ($DFROM::TIMESTAMPTZ IS NULL
+         OR content_pages.route_id IS NULL
+         OR EXISTS (
+             SELECT 1 FROM schedules s
+             WHERE s.route_id = content_pages.route_id
+               AND s.departure_time >= $DFROM::TIMESTAMPTZ))
+    AND ($DTO::TIMESTAMPTZ IS NULL
+         OR content_pages.route_id IS NULL
+         OR EXISTS (
+             SELECT 1 FROM schedules s
+             WHERE s.route_id = content_pages.route_id
+               AND s.departure_time <= $DTO::TIMESTAMPTZ))";
+
 // ── GET /content ──────────────────────────────────────────────────────────────
 
 pub async fn list_content(
@@ -87,6 +114,8 @@ pub async fn list_content(
     let category = params.category.as_deref().filter(|s| !s.is_empty());
     let tag      = params.tag.as_deref().filter(|s| !s.is_empty());
     let city     = params.city.as_deref().filter(|s| !s.is_empty());
+    let dep_from = params.departure_from.as_deref().filter(|s| !s.is_empty());
+    let dep_to   = params.departure_to.as_deref().filter(|s| !s.is_empty());
 
     // ── Try full-text search ──────────────────────────────────────────────
     if let Some(query) = q {
@@ -97,11 +126,23 @@ pub async fn list_content(
                AND ($2::TEXT IS NULL OR category = $2)
                AND ($3::TEXT IS NULL OR EXISTS (
                        SELECT 1 FROM content_tags ct
-                       WHERE ct.content_id = content_pages.id AND ct.tag = $3))",
+                       WHERE ct.content_id = content_pages.id AND ct.tag = $3))
+               AND ($4::TIMESTAMPTZ IS NULL
+                    OR content_pages.route_id IS NULL
+                    OR EXISTS (SELECT 1 FROM schedules s
+                               WHERE s.route_id = content_pages.route_id
+                                 AND s.departure_time >= $4::TIMESTAMPTZ))
+               AND ($5::TIMESTAMPTZ IS NULL
+                    OR content_pages.route_id IS NULL
+                    OR EXISTS (SELECT 1 FROM schedules s
+                               WHERE s.route_id = content_pages.route_id
+                                 AND s.departure_time <= $5::TIMESTAMPTZ))",
         )
         .bind(query)
         .bind(category)
         .bind(tag)
+        .bind(dep_from)
+        .bind(dep_to)
         .fetch_one(pool.get_ref())
         .await
         .map_err(AppError::Database)?;
@@ -117,11 +158,22 @@ pub async fn list_content(
                    AND ($3::TEXT IS NULL OR EXISTS (
                            SELECT 1 FROM content_tags ct
                            WHERE ct.content_id = content_pages.id AND ct.tag = $3))
+                   AND ($4::TIMESTAMPTZ IS NULL
+                        OR content_pages.route_id IS NULL
+                        OR EXISTS (SELECT 1 FROM schedules s
+                                   WHERE s.route_id = content_pages.route_id
+                                     AND s.departure_time >= $4::TIMESTAMPTZ))
+                   AND ($5::TIMESTAMPTZ IS NULL
+                        OR content_pages.route_id IS NULL
+                        OR EXISTS (SELECT 1 FROM schedules s
+                                   WHERE s.route_id = content_pages.route_id
+                                     AND s.departure_time <= $5::TIMESTAMPTZ))
                  ORDER BY ts_rank(search_vector, plainto_tsquery('english', $1)) DESC,
                           updated_at DESC
-                 LIMIT $4 OFFSET $5",
+                 LIMIT $6 OFFSET $7",
             )
             .bind(query).bind(category).bind(tag)
+            .bind(dep_from).bind(dep_to)
             .bind(per_page).bind(offset)
             .fetch_all(pool.get_ref())
             .await
@@ -142,9 +194,20 @@ pub async fn list_content(
                AND ($3::TEXT IS NULL OR EXISTS (
                        SELECT 1 FROM content_tags ct
                        WHERE ct.content_id = content_pages.id AND ct.tag = $3))
-               AND (word_similarity($1, title) + word_similarity($1, body)) > 0.1",
+               AND (word_similarity($1, title) + word_similarity($1, body)) > 0.1
+               AND ($4::TIMESTAMPTZ IS NULL
+                    OR content_pages.route_id IS NULL
+                    OR EXISTS (SELECT 1 FROM schedules s
+                               WHERE s.route_id = content_pages.route_id
+                                 AND s.departure_time >= $4::TIMESTAMPTZ))
+               AND ($5::TIMESTAMPTZ IS NULL
+                    OR content_pages.route_id IS NULL
+                    OR EXISTS (SELECT 1 FROM schedules s
+                               WHERE s.route_id = content_pages.route_id
+                                 AND s.departure_time <= $5::TIMESTAMPTZ))",
         )
         .bind(query).bind(category).bind(tag)
+        .bind(dep_from).bind(dep_to)
         .fetch_one(pool.get_ref())
         .await
         .map_err(AppError::Database)?;
@@ -158,11 +221,22 @@ pub async fn list_content(
                AND ($3::TEXT IS NULL OR EXISTS (
                        SELECT 1 FROM content_tags ct
                        WHERE ct.content_id = content_pages.id AND ct.tag = $3))
+               AND ($4::TIMESTAMPTZ IS NULL
+                    OR content_pages.route_id IS NULL
+                    OR EXISTS (SELECT 1 FROM schedules s
+                               WHERE s.route_id = content_pages.route_id
+                                 AND s.departure_time >= $4::TIMESTAMPTZ))
+               AND ($5::TIMESTAMPTZ IS NULL
+                    OR content_pages.route_id IS NULL
+                    OR EXISTS (SELECT 1 FROM schedules s
+                               WHERE s.route_id = content_pages.route_id
+                                 AND s.departure_time <= $5::TIMESTAMPTZ))
              ORDER BY (word_similarity($1, title) + word_similarity($1, body)) DESC,
                       updated_at DESC
-             LIMIT $4 OFFSET $5",
+             LIMIT $6 OFFSET $7",
         )
         .bind(query).bind(category).bind(tag)
+        .bind(dep_from).bind(dep_to)
         .bind(per_page).bind(offset)
         .fetch_all(pool.get_ref())
         .await
@@ -175,7 +249,7 @@ pub async fn list_content(
         }));
     }
 
-    // ── No query — plain listing with optional category/tag filters ───────
+    // ── No query — plain listing with optional category/tag/city/departure filters ─
     let total: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM content_pages
          WHERE is_published = TRUE
@@ -183,9 +257,20 @@ pub async fn list_content(
            AND ($2::TEXT IS NULL OR EXISTS (
                    SELECT 1 FROM content_tags ct
                    WHERE ct.content_id = content_pages.id AND ct.tag = $2))
-           AND ($3::TEXT IS NULL OR city ILIKE '%' || $3 || '%')",
+           AND ($3::TEXT IS NULL OR city ILIKE '%' || $3 || '%')
+           AND ($4::TIMESTAMPTZ IS NULL
+                OR content_pages.route_id IS NULL
+                OR EXISTS (SELECT 1 FROM schedules s
+                           WHERE s.route_id = content_pages.route_id
+                             AND s.departure_time >= $4::TIMESTAMPTZ))
+           AND ($5::TIMESTAMPTZ IS NULL
+                OR content_pages.route_id IS NULL
+                OR EXISTS (SELECT 1 FROM schedules s
+                           WHERE s.route_id = content_pages.route_id
+                             AND s.departure_time <= $5::TIMESTAMPTZ))",
     )
     .bind(category).bind(tag).bind(city)
+    .bind(dep_from).bind(dep_to)
     .fetch_one(pool.get_ref())
     .await
     .map_err(AppError::Database)?;
@@ -200,10 +285,21 @@ pub async fn list_content(
                    SELECT 1 FROM content_tags ct
                    WHERE ct.content_id = content_pages.id AND ct.tag = $2))
            AND ($3::TEXT IS NULL OR city ILIKE '%' || $3 || '%')
+           AND ($4::TIMESTAMPTZ IS NULL
+                OR content_pages.route_id IS NULL
+                OR EXISTS (SELECT 1 FROM schedules s
+                           WHERE s.route_id = content_pages.route_id
+                             AND s.departure_time >= $4::TIMESTAMPTZ))
+           AND ($5::TIMESTAMPTZ IS NULL
+                OR content_pages.route_id IS NULL
+                OR EXISTS (SELECT 1 FROM schedules s
+                           WHERE s.route_id = content_pages.route_id
+                             AND s.departure_time <= $5::TIMESTAMPTZ))
          ORDER BY updated_at DESC
-         LIMIT $4 OFFSET $5",
+         LIMIT $6 OFFSET $7",
     )
     .bind(category).bind(tag).bind(city)
+    .bind(dep_from).bind(dep_to)
     .bind(per_page).bind(offset)
     .fetch_all(pool.get_ref())
     .await
@@ -250,7 +346,10 @@ pub async fn get_article(
         rows.into_iter().map(|r| r.0).collect()
     };
 
-    // Fetch related: same category OR shared tags, ranked by category match.
+    // Fetch related: same category OR shared tags, ranked by:
+    //   1. Category match (exact = 0, other = 1)
+    //   2. Title similarity via pg_trgm word_similarity (higher = better)
+    //   3. Recency
     let related: Vec<ContentSummary> = sqlx::query_as(
         "SELECT DISTINCT cp.id, cp.slug, cp.title, cp.category, cp.route_id,
                 cp.is_published, cp.quality_score, cp.publish_date, cp.updated_at
@@ -267,11 +366,13 @@ pub async fn get_article(
            )
          ORDER BY
              CASE WHEN cp.category = $2 THEN 0 ELSE 1 END,
+             word_similarity($3, cp.title) DESC,
              cp.updated_at DESC
          LIMIT 5",
     )
     .bind(page.id)
     .bind(&page.category)
+    .bind(&page.title)
     .fetch_all(pool.get_ref())
     .await
     .map_err(AppError::Database)?;

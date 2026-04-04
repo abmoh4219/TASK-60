@@ -125,7 +125,7 @@ pub struct PassengerItem {
 impl PassengerItem {
     pub fn masked_phone(&self) -> String {
         match &self.phone_last4 {
-            Some(l4) => format!("•••• {}", l4),
+            Some(l4) => format!("(XXX) XXX-{}", l4),
             None     => "—".into(),
         }
     }
@@ -205,7 +205,7 @@ impl OrderDetail {
     }
     pub fn masked_phone(&self) -> String {
         match &self.phone_last4 {
-            Some(l4) => format!("•••• {}", l4),
+            Some(l4) => format!("(XXX) XXX-{}", l4),
             None     => "—".into(),
         }
     }

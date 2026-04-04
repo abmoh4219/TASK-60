@@ -6,10 +6,16 @@
 //!   5. Bumps `last_active_at` to reset the idle window
 //!
 //! Signing protocol:
-//!   message  = "METHOD\nPATH\nUNIX_TIMESTAMP_SECS"
+//!   message  = "METHOD\nPATH_WITH_QUERY\nUNIX_TIMESTAMP_SECS"
 //!   key      = raw Bearer token
 //!   sig      = HMAC-SHA-256(key, message) — hex-encoded, in X-RailOps-Sig header
 //!   Timestamp must be within ±120 s of server time.
+//!
+//!   PATH_WITH_QUERY = path + "?" + query_string  (if query_string is non-empty)
+//!                   = path                        (if query_string is empty)
+//!
+//! This ensures query parameters are covered by the signature, preventing
+//! replay attacks that tamper with query string values.
 
 use actix_web::{dev::Payload, web, FromRequest, HttpRequest};
 use chrono::Utc;
@@ -96,6 +102,7 @@ impl FromRequest for AuthUser {
 
         let method = req.method().as_str().to_uppercase();
         let path   = req.path().to_owned();
+        let qs     = req.query_string().to_owned();
 
         let token = extract_bearer(req);
         let ts    = extract_header_i64(req, "X-RailOps-Ts");
@@ -116,9 +123,15 @@ impl FromRequest for AuthUser {
                 return Err(AppError::Unauthorized("Request timestamp out of window".into()));
             }
 
-            let message = format!("{method}\n{path}\n{ts}");
+            // Include query string in the signed message to prevent query-param tampering.
+            let path_with_query = if qs.is_empty() {
+                path.clone()
+            } else {
+                format!("{path}?{qs}")
+            };
+            let message = format!("{method}\n{path_with_query}\n{ts}");
             if !crate::crypto::hmac_verify(&raw_token, &message, &sig) {
-                warn!(path = %path, "Invalid request signature");
+                warn!(path = %path_with_query, "Invalid request signature");
                 return Err(AppError::Unauthorized("Invalid request signature".into()));
             }
 

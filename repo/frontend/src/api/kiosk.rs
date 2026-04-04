@@ -135,12 +135,18 @@ pub struct TagCount {
 // ── API functions ─────────────────────────────────────────────────────────────
 
 /// Search / list published content.
+///
+/// `departure_from` / `departure_to` are optional ISO-8601 datetime strings
+/// (e.g. `"2026-06-01T00:00:00Z"`) that filter content linked to routes with
+/// departures within the given window.
 pub async fn search_content(
-    q:        Option<&str>,
-    category: Option<&str>,
-    tag:      Option<&str>,
-    page:     i64,
-    per_page: i64,
+    q:              Option<&str>,
+    category:       Option<&str>,
+    tag:            Option<&str>,
+    departure_from: Option<&str>,
+    departure_to:   Option<&str>,
+    page:           i64,
+    per_page:       i64,
 ) -> ApiResult<SearchResponse> {
     let mut url = format!("/api/v1/kiosk/content?page={page}&per_page={per_page}");
     if let Some(q) = q.filter(|s| !s.is_empty()) {
@@ -151,6 +157,12 @@ pub async fn search_content(
     }
     if let Some(t) = tag.filter(|s| !s.is_empty()) {
         url.push_str(&format!("&tag={}", urlenc(t)));
+    }
+    if let Some(df) = departure_from.filter(|s| !s.is_empty()) {
+        url.push_str(&format!("&departure_from={}", urlenc(df)));
+    }
+    if let Some(dt) = departure_to.filter(|s| !s.is_empty()) {
+        url.push_str(&format!("&departure_to={}", urlenc(dt)));
     }
     get_public(&url).await
 }

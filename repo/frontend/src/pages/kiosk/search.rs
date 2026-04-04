@@ -24,13 +24,19 @@ use crate::pages::kiosk::home::{article_card, footer, nav_bar};
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize, Default)]
 pub struct SearchQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub q:        Option<String>,
+    pub q:              Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
+    pub category:       Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tag:      Option<String>,
+    pub tag:            Option<String>,
+    /// ISO-8601 departure lower bound, e.g. `"2026-06-01"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub page:     Option<i64>,
+    pub departure_from: Option<String>,
+    /// ISO-8601 departure upper bound, e.g. `"2026-06-30"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub departure_to:   Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page:           Option<i64>,
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -103,12 +109,14 @@ pub fn kiosk_search() -> Html {
             error.set(None);
 
             spawn_local(async move {
-                let q        = params.q.as_deref();
-                let category = params.category.as_deref();
-                let tag      = params.tag.as_deref();
-                let page     = params.page.unwrap_or(1);
+                let q              = params.q.as_deref();
+                let category       = params.category.as_deref();
+                let tag            = params.tag.as_deref();
+                let departure_from = params.departure_from.as_deref();
+                let departure_to   = params.departure_to.as_deref();
+                let page           = params.page.unwrap_or(1);
 
-                match kiosk::search_content(q, category, tag, page, 12).await {
+                match kiosk::search_content(q, category, tag, departure_from, departure_to, page, 12).await {
                     Ok(r)  => { results.set(Some(r)); loading.set(false); }
                     Err(e) => {
                         error.set(Some(e.message));
@@ -138,6 +146,33 @@ pub fn kiosk_search() -> Html {
             move || drop(handle)
         });
     }
+
+    // ── Departure filter handlers ─────────────────────────────────────────
+    let on_departure_from = {
+        let navigator = navigator.clone();
+        let q = url_q.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            let val = el.value();
+            let mut qq = q.clone();
+            qq.departure_from = if val.is_empty() { None } else { Some(val) };
+            qq.page = None;
+            navigator.push_with_query(&Route::KioskSearch, &qq).ok();
+        })
+    };
+
+    let on_departure_to = {
+        let navigator = navigator.clone();
+        let q = url_q.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            let val = el.value();
+            let mut qq = q.clone();
+            qq.departure_to = if val.is_empty() { None } else { Some(val) };
+            qq.page = None;
+            navigator.push_with_query(&Route::KioskSearch, &qq).ok();
+        })
+    };
 
     // ── Event handlers ────────────────────────────────────────────────────
     let on_input = {
@@ -192,9 +227,11 @@ pub fn kiosk_search() -> Html {
     };
 
     // ── Render ────────────────────────────────────────────────────────────
-    let active_q        = url_q.q.as_deref().unwrap_or("").to_owned();
-    let active_category = url_q.category.clone();
-    let active_tag      = url_q.tag.clone();
+    let active_q           = url_q.q.as_deref().unwrap_or("").to_owned();
+    let active_category    = url_q.category.clone();
+    let active_tag         = url_q.tag.clone();
+    let active_dep_from    = url_q.departure_from.clone().unwrap_or_default();
+    let active_dep_to      = url_q.departure_to.clone().unwrap_or_default();
 
     html! {
         <div class="min-h-screen bg-slate-50">
@@ -229,6 +266,36 @@ pub fn kiosk_search() -> Html {
                                  text-slate-600 hover:bg-slate-50 transition">
                         {"← Home"}
                     </Link<Route>>
+                </div>
+
+                // ── Departure window filter ───────────────────────────────
+                <div class="flex flex-wrap gap-3 mb-4">
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-slate-500 font-medium whitespace-nowrap">
+                            {"Departs from"}
+                        </label>
+                        <input
+                            type="date"
+                            value={active_dep_from.clone()}
+                            oninput={on_departure_from}
+                            class="rounded-lg border border-slate-300 px-3 py-2 text-sm \
+                                   focus:border-indigo-500 focus:outline-none focus:ring-2 \
+                                   focus:ring-indigo-200"
+                        />
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-slate-500 font-medium whitespace-nowrap">
+                            {"to"}
+                        </label>
+                        <input
+                            type="date"
+                            value={active_dep_to.clone()}
+                            oninput={on_departure_to}
+                            class="rounded-lg border border-slate-300 px-3 py-2 text-sm \
+                                   focus:border-indigo-500 focus:outline-none focus:ring-2 \
+                                   focus:ring-indigo-200"
+                        />
+                    </div>
                 </div>
 
                 // ── Active filter chips ───────────────────────────────────

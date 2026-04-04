@@ -27,6 +27,7 @@ use crate::components::{
     icons, status_badge, empty_state, btn_primary, btn_secondary, input_cls, select_cls,
     skeleton_rows,
 };
+use crate::components::toast::{use_toasts, ToastKind};
 
 use super::OpsLayout;
 
@@ -62,6 +63,8 @@ pub fn ops_staffing_page() -> Html {
     let user  = auth.current_user().unwrap();
 
     let can_manage = matches!(user.role, UserRole::Admin | UserRole::Dispatcher);
+
+    let toasts = use_toasts();
 
     // ── Tab: 0=Shifts  1=Contractors ──────────────────────────────────────
     let active_tab = use_state(|| 0u8);
@@ -226,26 +229,34 @@ pub fn ops_staffing_page() -> Html {
         let shift_detail   = shift_detail.clone();
         let selected_shift = selected_shift.clone();
         let token          = token.clone();
+        let toast_push     = toasts.push.clone();
         Callback::from(move |(shift_id, contractor_id): (String, String)| {
-            let (ok, err, detail, sel, token) = (
+            let (ok, err, detail, sel, token, toast_push) = (
                 action_ok.clone(),
                 action_err.clone(),
                 shift_detail.clone(),
                 selected_shift.clone(),
                 token.clone(),
+                toast_push.clone(),
             );
             spawn_local(async move {
                 err.set(None);
                 match staffing_api::propose_assignment(&token, &shift_id, &contractor_id).await {
                     Ok(_)  => {
                         ok.set(Some(format!("Proposed contractor {contractor_id}")));
+                        toast_push.emit(("Assignment proposed successfully.".into(), ToastKind::Success));
                         // Refresh shift detail.
                         if let Ok(d) = staffing_api::get_shift(&token, &shift_id).await {
                             detail.set(Some(d));
                         }
                     }
-                    Err(e) => { err.set(Some(e.message)); }
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        err.set(Some(e.message));
+                        toast_push.emit((msg, ToastKind::Error));
+                    }
                 }
+                drop(sel);
             });
         })
     };
@@ -256,19 +267,25 @@ pub fn ops_staffing_page() -> Html {
         let action_err   = action_err.clone();
         let shift_detail = shift_detail.clone();
         let token        = token.clone();
+        let toast_push   = toasts.push.clone();
         Callback::from(move |(assignment_id, status, shift_id): (String, String, String)| {
-            let (ok, err, detail, token) =
-                (action_ok.clone(), action_err.clone(), shift_detail.clone(), token.clone());
+            let (ok, err, detail, token, toast_push) =
+                (action_ok.clone(), action_err.clone(), shift_detail.clone(), token.clone(), toast_push.clone());
             spawn_local(async move {
                 err.set(None);
                 match staffing_api::respond_assignment(&token, &assignment_id, &status).await {
                     Ok(_)  => {
                         ok.set(Some(format!("Assignment {status}")));
+                        toast_push.emit((format!("Assignment {status}."), ToastKind::Success));
                         if let Ok(d) = staffing_api::get_shift(&token, &shift_id).await {
                             detail.set(Some(d));
                         }
                     }
-                    Err(e) => { err.set(Some(e.message)); }
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        err.set(Some(e.message));
+                        toast_push.emit((msg, ToastKind::Error));
+                    }
                 }
             });
         })
@@ -363,6 +380,7 @@ pub fn ops_staffing_page() -> Html {
 
     // ── Render ────────────────────────────────────────────────────────────
     html! {
+        <>
         <OpsLayout active={Route::OpsStaffing}>
             <div class="space-y-6 max-w-7xl">
                 // ── Page header ───────────────────────────────────────────
@@ -727,6 +745,8 @@ pub fn ops_staffing_page() -> Html {
                 }
             </div>
         </OpsLayout>
+        { toasts.view }
+        </>
     }
 }
 

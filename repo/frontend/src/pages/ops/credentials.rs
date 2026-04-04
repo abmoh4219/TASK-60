@@ -27,6 +27,7 @@ use crate::components::{
     icons, status_badge, empty_state, skeleton_rows,
     btn_primary, btn_secondary, btn_danger, input_cls, select_cls,
 };
+use crate::components::toast::{use_toasts, ToastKind};
 
 use super::OpsLayout;
 
@@ -151,6 +152,7 @@ pub fn ops_credentials_page() -> Html {
     let user  = auth.current_user().unwrap();
 
     let can_approve = matches!(user.role, UserRole::Admin | UserRole::Dispatcher);
+    let toasts = use_toasts();
 
     // ── List state ─────────────────────────────────────────────────────────
     let creds:   UseStateHandle<Vec<CredentialRow>> = use_state(Vec::new);
@@ -252,6 +254,7 @@ pub fn ops_credentials_page() -> Html {
             selected.clone(), rev_status.clone(), rev_notes.clone(),
             reload.clone(), success.clone(), error.clone(), action.clone(), token.clone(),
         );
+        let toast_push = toasts.push.clone();
         Callback::from(move |_: MouseEvent| {
             let id = match &*selected { Some(c) => c.id, None => return };
             let body = ReviewBody {
@@ -261,18 +264,25 @@ pub fn ops_credentials_page() -> Html {
                     if n.is_empty() { None } else { Some(n) }
                 },
             };
-            let (reload, success, error, action, token) = (
-                reload.clone(), success.clone(), error.clone(), action.clone(), token.clone(),
+            let (reload, success, error, action, token, toast_push) = (
+                reload.clone(), success.clone(), error.clone(), action.clone(),
+                token.clone(), toast_push.clone(),
             );
             let status_label = body.status.clone();
             spawn_local(async move {
                 match creds_api::review_credential(&token, id, &body).await {
                     Ok(_) => {
-                        success.set(Some(format!("Credential {status_label}.")));
+                        let msg = format!("Credential {}.", status_label);
+                        success.set(Some(msg.clone()));
+                        toast_push.emit((msg, ToastKind::Success));
                         action.set(0);
                         reload.set(reload.wrapping_add(1));
                     }
-                    Err(e) => { error.set(Some(e.message)); }
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        error.set(Some(e.message));
+                        toast_push.emit((msg, ToastKind::Error));
+                    }
                 }
             });
         })
@@ -284,6 +294,7 @@ pub fn ops_credentials_page() -> Html {
             selected.clone(), esign_name.clone(), esign_date.clone(),
             reload.clone(), success.clone(), error.clone(), action.clone(), token.clone(),
         );
+        let toast_push = toasts.push.clone();
         Callback::from(move |_: MouseEvent| {
             let id = match &*selected { Some(c) => c.id, None => return };
             let name = (*esign_name).trim().to_owned();
@@ -293,17 +304,23 @@ pub fn ops_credentials_page() -> Html {
                 return;
             }
             let body  = EsignBody { signer_name: name, signed_date: date };
-            let (reload, success, error, action, token) = (
-                reload.clone(), success.clone(), error.clone(), action.clone(), token.clone(),
+            let (reload, success, error, action, token, toast_push) = (
+                reload.clone(), success.clone(), error.clone(), action.clone(),
+                token.clone(), toast_push.clone(),
             );
             spawn_local(async move {
                 match creds_api::esign_credential(&token, id, &body).await {
                     Ok(_) => {
                         success.set(Some("E-signature recorded.".into()));
+                        toast_push.emit(("E-signature recorded.".into(), ToastKind::Success));
                         action.set(0);
                         reload.set(reload.wrapping_add(1));
                     }
-                    Err(e) => { error.set(Some(e.message)); }
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        error.set(Some(e.message));
+                        toast_push.emit((msg, ToastKind::Error));
+                    }
                 }
             });
         })
@@ -313,17 +330,24 @@ pub fn ops_credentials_page() -> Html {
     let on_sweep = {
         let (reload, success, error, token) =
             (reload.clone(), success.clone(), error.clone(), token.clone());
+        let toast_push = toasts.push.clone();
         Callback::from(move |_: MouseEvent| {
-            let (reload, success, error, token) =
-                (reload.clone(), success.clone(), error.clone(), token.clone());
+            let (reload, success, error, token, toast_push) =
+                (reload.clone(), success.clone(), error.clone(), token.clone(), toast_push.clone());
             spawn_local(async move {
                 match creds_api::run_expiry_sweep(&token).await {
                     Ok(v) => {
-                        let n = v["expired_count"].as_u64().unwrap_or(0);
-                        success.set(Some(format!("Sweep complete — {n} credential(s) expired.")));
+                        let n   = v["expired_count"].as_u64().unwrap_or(0);
+                        let msg = format!("Sweep complete — {n} credential(s) expired.");
+                        success.set(Some(msg.clone()));
+                        toast_push.emit((msg, ToastKind::Info));
                         reload.set(reload.wrapping_add(1));
                     }
-                    Err(e) => { error.set(Some(e.message)); }
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        error.set(Some(e.message));
+                        toast_push.emit((msg, ToastKind::Error));
+                    }
                 }
             });
         })
@@ -339,6 +363,7 @@ pub fn ops_credentials_page() -> Html {
             reload.clone(), success.clone(), error.clone(),
             show_upload.clone(), token.clone(),
         );
+        let toast_push = toasts.push.clone();
         Callback::from(move |_: MouseEvent| {
             let input = match file_input_ref.cast::<HtmlInputElement>() {
                 Some(el) => el,
@@ -372,18 +397,23 @@ pub fn ops_credentials_page() -> Html {
             if !expires.is_empty() {
                 let _ = form.append_with_str("expires_at", &expires);
             }
-            let (reload, success, error, show_upload, token) = (
+            let (reload, success, error, show_upload, token, toast_push) = (
                 reload.clone(), success.clone(), error.clone(),
-                show_upload.clone(), token.clone(),
+                show_upload.clone(), token.clone(), toast_push.clone(),
             );
             spawn_local(async move {
                 match creds_api::upload_credential(&token, form).await {
                     Ok(_) => {
                         success.set(Some("Document uploaded.".into()));
+                        toast_push.emit(("Document uploaded successfully.".into(), ToastKind::Success));
                         show_upload.set(false);
                         reload.set(reload.wrapping_add(1));
                     }
-                    Err(e) => { error.set(Some(e.message)); }
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        error.set(Some(e.message));
+                        toast_push.emit((msg, ToastKind::Error));
+                    }
                 }
             });
         })
@@ -391,6 +421,7 @@ pub fn ops_credentials_page() -> Html {
 
     // ── Render ─────────────────────────────────────────────────────────────
     html! {
+        <>
         <OpsLayout active={Route::OpsCredentials}>
             <div class="space-y-5">
 
@@ -851,5 +882,7 @@ pub fn ops_credentials_page() -> Html {
                 </div>
             </div>
         </OpsLayout>
+        { toasts.view }
+        </>
     }
 }

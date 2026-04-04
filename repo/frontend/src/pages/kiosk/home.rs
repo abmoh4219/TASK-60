@@ -72,7 +72,7 @@ pub fn kiosk_home() -> Html {
         use_effect_with((), move |_| {
             spawn_local(async move {
                 let (lat, cats) = futures::join!(
-                    kiosk::search_content(None, None, None, 1, 6),
+                    kiosk::search_content(None, None, None, None, None, 1, 6),
                     kiosk::list_categories(),
                 );
                 if let Ok(r) = lat  { latest.set(r.items); }

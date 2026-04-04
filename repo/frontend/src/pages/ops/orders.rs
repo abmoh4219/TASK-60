@@ -23,6 +23,7 @@ use crate::components::{
     empty_state, icons, input_cls, select_cls, skeleton_rows, status_badge,
     btn_primary, btn_secondary, btn_danger,
 };
+use crate::components::toast::{use_toasts, ToastKind};
 
 use super::OpsLayout;
 
@@ -37,6 +38,8 @@ pub fn ops_orders_page() -> Html {
     let can_manage_orders  = matches!(user.role, UserRole::Admin | UserRole::OpsAgent | UserRole::CsAgent);
     let can_process_refund = matches!(user.role, UserRole::Admin | UserRole::OpsAgent | UserRole::CsAgent);
     let can_override_fee   = matches!(user.role, UserRole::Admin | UserRole::OpsAgent);
+
+    let toasts = use_toasts();
 
     // ── Tab: 0=orders  1=passengers ───────────────────────────────────────
     let active_tab = use_state(|| 0u8);
@@ -154,6 +157,7 @@ pub fn ops_orders_page() -> Html {
         let (action, action_err, action_ok) = (action.clone(), action_err.clone(), action_ok.clone());
         let (form_reason, form_amount, form_disrupt) =
             (form_reason.clone(), form_amount.clone(), form_disrupt.clone());
+        let toast_push = toasts.push.clone();
         Callback::from(move |kind: u8| {
             let id = match (*selected_order_id).clone() { Some(i) => i, None => return };
             let reason   = (*form_reason).trim().to_owned();
@@ -161,6 +165,7 @@ pub fn ops_orders_page() -> Html {
             let disrupt  = *form_disrupt;
             let (token, order_detail, action, action_err, action_ok) =
                 (token.clone(), order_detail.clone(), action.clone(), action_err.clone(), action_ok.clone());
+            let toast_push = toast_push.clone();
             spawn_local(async move {
                 let result: Result<(), _> = match kind {
                     1 => ops_api::confirm_order(&token, &id).await,
@@ -183,8 +188,13 @@ pub fn ops_orders_page() -> Html {
                             order_detail.set(Some(d));
                         }
                         action.set(0); action_err.set(None); action_ok.set(true);
+                        toast_push.emit(("Action completed successfully.".into(), ToastKind::Success));
                     }
-                    Err(e) => { action_err.set(Some(e.message)); }
+                    Err(e) => {
+                        let msg = e.message.clone();
+                        action_err.set(Some(e.message));
+                        toast_push.emit((msg, ToastKind::Error));
+                    }
                 }
             });
         })
@@ -192,6 +202,7 @@ pub fn ops_orders_page() -> Html {
 
     // ── Render ────────────────────────────────────────────────────────────
     html! {
+        <>
         <OpsLayout active={Route::OpsOrders}>
             <div class="space-y-5">
 
@@ -430,6 +441,8 @@ pub fn ops_orders_page() -> Html {
                 }
             </div>
         </OpsLayout>
+        { toasts.view }
+        </>
     }
 }
 

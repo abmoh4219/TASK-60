@@ -31,6 +31,19 @@ impl<'a> ContractorRepo<'a> {
         .map_err(AppError::Database)
     }
 
+    /// Look up the contractor UUID that is linked to a given user account.
+    /// Returns `None` if no contractor profile has been associated with this user.
+    pub async fn find_id_by_user_id(&self, user_id: Uuid) -> AppResult<Option<Uuid>> {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT id FROM contractors WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(self.0)
+        .await
+        .map_err(AppError::Database)?;
+        Ok(row.map(|(id,)| id))
+    }
+
     pub async fn list(
         &self,
         region:    Option<&str>,

@@ -35,12 +35,12 @@ production.
 
 Open **https://localhost:8443** in your browser.
 
-- `/` → Kiosk (public article search, archive, categories)
-- `/login` → Staff login
-- `/ops` → Operations console (schedules, orders, passengers)
-- `/ops/rules` → Business rules (Admin only)
-- `/ops/staffing` → Staffing dispatch
-- `/ops/credentials` → Credential management
+- `#/` → Kiosk (public article search, archive, categories)
+- `#/login` → Staff login
+- `#/ops` → Operations console (schedules, orders, passengers)
+- `#/ops/rules` → Business rules (Admin only)
+- `#/ops/staffing` → Staffing dispatch
+- `#/ops/credentials` → Credential management
 
 ---
 
@@ -51,7 +51,7 @@ All authenticated requests require:
 ```
 Authorization: Bearer <token>
 X-RailOps-Ts:  <unix_timestamp_seconds>
-X-RailOps-Sig: <hmac-sha256(token, "METHOD\nPATH\nTS")>
+X-RailOps-Sig: <hmac-sha256(token, "METHOD\nPATH_WITH_QUERY\nTS")>
 ```
 
 See [`docs/api-spec.md`](docs/api-spec.md) for full endpoint documentation.

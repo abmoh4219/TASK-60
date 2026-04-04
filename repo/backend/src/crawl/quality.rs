@@ -5,10 +5,17 @@
 //! | Dimension    | Weight | Basis                                               |
 //! |--------------|--------|-----------------------------------------------------|
 //! | Completeness | 50 %   | presence of title, body, category, tags, date, URL  |
-//! | Accuracy     | 30 %   | structural validity (URL scheme, body/title length) |
+//! | Accuracy     | 30 %   | structural validity + domain anomaly checks         |
 //! | Timeliness   | 20 %   | publish_date age (recent = higher score)            |
 //!
 //! Total below 85 blocks publishing (see `QualityScore::is_publishable`).
+//!
+//! ## Domain anomaly checks (within Accuracy dimension)
+//!
+//! - Placeholder content (`lorem ipsum`, `[placeholder]`, etc.)
+//! - Negative fare values in fare-category articles
+//! - Stale disruption/delay notices (>30 days old)
+//! - Suspicious test-data markers
 //!
 //! ## Similarity quarantine
 //!
@@ -89,6 +96,7 @@ fn score_completeness(item: &TransformedItem, issues: &mut Vec<String>) -> f64 {
 fn score_accuracy(item: &TransformedItem, issues: &mut Vec<String>) -> f64 {
     let mut score: f64 = 100.0;
 
+    // ── Structural validity ───────────────────────────────────────────────
     if item.body.len() < 50 {
         score -= 40.0;
         issues.push("short_body".into());
@@ -111,7 +119,76 @@ fn score_accuracy(item: &TransformedItem, issues: &mut Vec<String>) -> f64 {
         issues.push("too_many_tags".into());
     }
 
+    // ── Domain anomaly checks ─────────────────────────────────────────────
+    score -= check_anomalies(item, issues);
+
     score.max(0.0)
+}
+
+/// Detect railway-domain anomalies and return a total penalty (0..100).
+fn check_anomalies(item: &TransformedItem, issues: &mut Vec<String>) -> f64 {
+    let mut penalty: f64 = 0.0;
+    let body_lower  = item.body.to_lowercase();
+    let title_lower = item.title.to_lowercase();
+
+    // ── Placeholder / test content ────────────────────────────────────────
+    if body_lower.contains("lorem ipsum") {
+        issues.push("placeholder_content".into());
+        penalty += 80.0;
+    }
+    if body_lower.contains("[placeholder]")
+        || body_lower.contains("[to be completed]")
+        || body_lower.contains("[tbd]")
+        || body_lower.contains("todo: fill")
+    {
+        issues.push("incomplete_placeholder_content".into());
+        penalty += 60.0;
+    }
+    if title_lower.contains("test article")
+        || title_lower.contains("dummy content")
+        || body_lower.starts_with("test ")
+    {
+        issues.push("test_content_detected".into());
+        penalty += 50.0;
+    }
+
+    // ── Negative fare values (fares/pricing category anomaly) ─────────────
+    // Check for negative monetary patterns: -£N, - £N, or "negative fare/price/cost"
+    if item.category == "fares" || body_lower.contains("fare") || body_lower.contains("price") {
+        let has_negative_fare = body_lower.contains("-£")
+            || body_lower.contains("- £")
+            || body_lower.contains("-$")
+            || (body_lower.contains("negative")
+                && (body_lower.contains("fare")
+                    || body_lower.contains("price")
+                    || body_lower.contains("cost")));
+        if has_negative_fare {
+            issues.push("negative_fare_detected".into());
+            penalty += 40.0;
+        }
+    }
+
+    // ── Stale disruption notices ──────────────────────────────────────────
+    // Delay/disruption articles older than 30 days are anomalous (outdated operational data)
+    if item.category == "delays" {
+        if let Some(date) = item.publish_date {
+            let today = Utc::now().date_naive();
+            let age   = (today - date).num_days();
+            if age > 30 {
+                issues.push("stale_disruption_notice".into());
+                penalty += 25.0;
+            }
+        }
+    }
+
+    // ── Missing critical fields for specific categories ───────────────────
+    // Fare articles without a source URL are suspicious (prices need authoritative source)
+    if item.category == "fares" && item.source_url.is_none() {
+        issues.push("fare_article_missing_source".into());
+        penalty += 15.0;
+    }
+
+    penalty
 }
 
 // ── Timeliness (20 %) ─────────────────────────────────────────────────────────

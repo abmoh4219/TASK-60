@@ -239,12 +239,20 @@ pub async fn upload_credential(
         return Err(AppError::Validation("file is empty".into()));
     }
 
-    // ── MIME type validation ───────────────────────────────────────────────
+    // ── MIME type validation (declared type) ──────────────────────────────
     if !matches!(
         mime_type.as_str(),
         "application/pdf" | "image/jpeg" | "image/png"
     ) {
         return Err(AppError::UnsupportedFileType(mime_type));
+    }
+
+    // ── Magic-byte validation (server-side; do not trust client MIME) ─────
+    if !validate_magic_bytes(&file_bytes, &mime_type) {
+        return Err(AppError::UnsupportedFileType(format!(
+            "File content does not match declared MIME type '{mime_type}'. \
+             Upload a valid PDF, JPEG, or PNG."
+        )));
     }
 
     // ── SHA-256 fingerprint + duplicate check ──────────────────────────────
@@ -595,4 +603,91 @@ fn decrypt_file_bytes(blob: &[u8], secret: &str) -> Result<Vec<u8>, AppError> {
 fn upload_secret() -> String {
     std::env::var("SESSION_SECRET")
         .unwrap_or_else(|_| "change_this_to_a_random_64_char_string_before_going_live_!!1".to_owned())
+}
+
+// ── Magic-byte validation ──────────────────────────────────────────────────────
+
+/// Validate that the first bytes of `data` match the expected magic signature
+/// for `declared_mime`.  Rejects files where the content doesn't match the
+/// client-declared MIME type, preventing extension/MIME spoofing attacks.
+fn validate_magic_bytes(data: &[u8], declared_mime: &str) -> bool {
+    match declared_mime {
+        "application/pdf" => data.starts_with(b"%PDF"),
+        "image/jpeg"      => data.len() >= 3
+                                && data[0] == 0xFF
+                                && data[1] == 0xD8
+                                && data[2] == 0xFF,
+        "image/png"       => data.starts_with(b"\x89PNG\r\n\x1A\n"),
+        _                 => false,
+    }
+}
+
+// ── Document download (authenticated, watermarked) ────────────────────────────
+
+/// GET /credentials/{id}/download
+///
+/// Decrypts the stored document, injects a viewer + timestamp watermark, and
+/// returns the raw file bytes with the correct `Content-Type` header.  Every
+/// download is logged in the credential audit trail.
+///
+/// For PDF files, a `%%RailOps-Watermark` comment is appended to the byte
+/// stream (harmless to standards-compliant PDF readers).
+/// For images, the watermark is conveyed via the `X-Watermark` response header.
+pub async fn download_credential(
+    pool:  web::Data<sqlx::PgPool>,
+    path:  web::Path<Uuid>,
+    auth:  RequireViewCredentials,
+) -> AppResult<HttpResponse> {
+    let id   = path.into_inner();
+    let cred = CredentialRepo::new(&pool)
+        .find_by_id(id)
+        .await?
+        .ok_or_else(|| AppError::NotFound(format!("Credential {id}")))?;
+
+    let upload_dir  = std::env::var("UPLOAD_DIR").unwrap_or_else(|_| "/app/uploads".to_owned());
+    let abs_path    = format!("{upload_dir}/{}", cred.file_path);
+    let encrypted   = tokio::fs::read(&abs_path).await
+        .map_err(|_| AppError::NotFound(format!("File not found for credential {id}")))?;
+
+    let plaintext = decrypt_file_bytes(&encrypted, &upload_secret())?;
+
+    let watermark_text = format!(
+        "Viewed by {} (user:{}) at {}",
+        auth.full_name.as_deref().unwrap_or(&auth.username),
+        auth.id,
+        chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ"),
+    );
+
+    // For PDFs, append a watermark comment to the byte stream.
+    let mut output = plaintext;
+    if cred.mime_type == "application/pdf" {
+        let wm_comment = format!("\n%%RailOps-Watermark: {watermark_text}\n");
+        output.extend_from_slice(wm_comment.as_bytes());
+    }
+
+    // ── Audit every download ──────────────────────────────────────────────
+    CredAuditRepo::new(&pool)
+        .insert(
+            id, "downloaded", Some(auth.id),
+            auth.full_name.as_deref(), None,
+            Some(json!({"watermark": &watermark_text, "action": "file_download"})),
+        )
+        .await?;
+
+    write_audit(
+        &pool,
+        "credential_downloaded", "credential", Some(id),
+        Some(auth.id), "download",
+        None,
+        Some(json!({ "watermark": &watermark_text })),
+        None,
+    )
+    .await;
+
+    let filename = &cred.file_name;
+    Ok(HttpResponse::Ok()
+        .insert_header(("Content-Type",        cred.mime_type.as_str()))
+        .insert_header(("Content-Disposition", format!("attachment; filename=\"{filename}\"")))
+        .insert_header(("X-Watermark",         watermark_text))
+        .body(output))
 }

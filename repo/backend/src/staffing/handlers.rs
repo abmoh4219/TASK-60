@@ -464,16 +464,48 @@ pub async fn list_subscriptions(
     pool: web::Data<sqlx::PgPool>,
     auth: RequireViewContractors,
 ) -> AppResult<HttpResponse> {
-    // Returns subscriptions held by the current user as both dispatcher and contractor.
+    // Dispatcher subscriptions are keyed to the user UUID.
     let dispatcher_subs = SubscriptionRepo::new(&pool)
         .list_for_subscriber("dispatcher", auth.id)
         .await?;
-    let contractor_subs = SubscriptionRepo::new(&pool)
-        .list_for_subscriber("contractor", auth.id)
-        .await?;
+
+    // Contractor subscriptions are keyed to the contractor UUID (not the user UUID).
+    // Look up the contractor record linked to this user account.
+    let contractor_subs =
+        match ContractorRepo::new(&pool).find_id_by_user_id(auth.id).await? {
+            Some(contractor_id) => {
+                SubscriptionRepo::new(&pool)
+                    .list_for_subscriber("contractor", contractor_id)
+                    .await?
+            }
+            None => vec![],
+        };
+
     let mut all = dispatcher_subs;
     all.extend(contractor_subs);
     Ok(HttpResponse::Ok().json(all))
+}
+
+/// Resolve the subscriber UUID for the given `subscriber_type`.
+///
+/// - `"dispatcher"` → user's own UUID
+/// - `"contractor"` → the contractor record UUID linked to this user account
+async fn resolve_subscriber_id(
+    pool:            &sqlx::PgPool,
+    user_id:         uuid::Uuid,
+    subscriber_type: &str,
+) -> AppResult<uuid::Uuid> {
+    if subscriber_type == "contractor" {
+        ContractorRepo::new(pool)
+            .find_id_by_user_id(user_id)
+            .await?
+            .ok_or_else(|| AppError::Validation(
+                "No contractor profile is linked to your account. \
+                 Contact an administrator to set up a contractor record.".into(),
+            ))
+    } else {
+        Ok(user_id)
+    }
 }
 
 pub async fn subscribe(
@@ -492,8 +524,12 @@ pub async fn subscribe(
             "target_type must be 'shift' or 'route'".into(),
         ));
     }
+
+    let subscriber_id =
+        resolve_subscriber_id(&pool, auth.id, &body.subscriber_type).await?;
+
     SubscriptionRepo::new(&pool)
-        .subscribe(&body.subscriber_type, auth.id, &body.target_type, body.target_id)
+        .subscribe(&body.subscriber_type, subscriber_id, &body.target_type, body.target_id)
         .await?;
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
@@ -504,8 +540,17 @@ pub async fn unsubscribe(
     auth: RequireViewContractors,
 ) -> AppResult<HttpResponse> {
     let body = body.into_inner();
+    if !matches!(body.subscriber_type.as_str(), "dispatcher" | "contractor") {
+        return Err(AppError::Validation(
+            "subscriber_type must be 'dispatcher' or 'contractor'".into(),
+        ));
+    }
+
+    let subscriber_id =
+        resolve_subscriber_id(&pool, auth.id, &body.subscriber_type).await?;
+
     SubscriptionRepo::new(&pool)
-        .unsubscribe(&body.subscriber_type, auth.id, &body.target_type, body.target_id)
+        .unsubscribe(&body.subscriber_type, subscriber_id, &body.target_type, body.target_id)
         .await?;
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
