@@ -52,6 +52,21 @@ impl<'a> ContentRepo<'a> {
         Ok(row.map(|r| r.0))
     }
 
+    /// Find by dedicated URL-only fingerprint (first-class URL dedup).
+    ///
+    /// Returns the existing content_id if the same source URL was already
+    /// ingested, regardless of whether the title/body has changed.
+    pub async fn find_by_url_fingerprint(&self, url_fp: &str) -> AppResult<Option<Uuid>> {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT id FROM content_pages WHERE url_fingerprint = $1",
+        )
+        .bind(url_fp)
+        .fetch_optional(self.0)
+        .await
+        .map_err(AppError::Database)?;
+        Ok(row.map(|r| r.0))
+    }
+
     /// Full-text search + optional category/published filters.
     pub async fn list(
         &self,
@@ -122,8 +137,8 @@ impl<'a> ContentRepo<'a> {
         let row: (Uuid,) = sqlx::query_as(
             "INSERT INTO content_pages
                  (slug, title, body, category, route_id, publish_date,
-                  source_url, source_fingerprint, quality_score)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                  source_url, source_fingerprint, url_fingerprint, quality_score)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
              RETURNING id",
         )
         .bind(&cmd.slug)
@@ -134,6 +149,7 @@ impl<'a> ContentRepo<'a> {
         .bind(cmd.publish_date)
         .bind(&cmd.source_url)
         .bind(&cmd.source_fingerprint)
+        .bind(&cmd.url_fingerprint)
         .bind(cmd.quality_score)
         .fetch_one(self.0)
         .await
@@ -176,21 +192,30 @@ impl<'a> ContentRepo<'a> {
         Ok(())
     }
 
-    /// Publish a page — blocked if `quality_score` < 85.
-    pub async fn publish(&self, id: Uuid) -> AppResult<()> {
+    /// Publish a page — blocked if `quality_score` < threshold.
+    ///
+    /// `min_score` is the runtime-configurable quality publish threshold,
+    /// loaded from the `quality_publish_threshold` business rule.
+    pub async fn publish_with_threshold(&self, id: Uuid, min_score: rust_decimal::Decimal) -> AppResult<()> {
         sqlx::query(
             "UPDATE content_pages
              SET is_published = TRUE,
                  publish_date = COALESCE(publish_date, CURRENT_DATE),
                  updated_at   = NOW()
              WHERE id = $1
-               AND (quality_score IS NULL OR quality_score >= 85)",
+               AND (quality_score IS NULL OR quality_score >= $2)",
         )
         .bind(id)
+        .bind(min_score)
         .execute(self.0)
         .await
         .map_err(AppError::Database)?;
         Ok(())
+    }
+
+    /// Convenience wrapper that uses the default threshold (85).
+    pub async fn publish(&self, id: Uuid) -> AppResult<()> {
+        self.publish_with_threshold(id, rust_decimal::Decimal::from(85)).await
     }
 
     pub async fn unpublish(&self, id: Uuid) -> AppResult<()> {

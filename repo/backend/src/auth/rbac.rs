@@ -78,9 +78,12 @@ impl RoleExt for UserRole {
                 | ViewAuditLog
             ),
 
+            // Customer-Service agents can manage/cancel orders, process refunds, and
+            // apply fee overrides — but must supply a mandatory reason note.
             UserRole::CsAgent => matches!(
                 perm,
                 ViewContent | ViewSchedules | ViewOrders | ManageOrders | ProcessRefunds
+                | OverrideFees
             ),
 
             UserRole::Dispatcher => matches!(

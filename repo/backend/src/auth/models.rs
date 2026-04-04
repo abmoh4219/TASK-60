@@ -37,6 +37,8 @@ pub struct SessionRecord {
     pub full_name:      Option<String>,
     pub expires_at:     DateTime<Utc>,
     pub last_active_at: DateTime<Utc>,
+    /// IP stored at login time (text cast of INET column). None for old sessions.
+    pub ip_address:     Option<String>,
 }
 
 impl SessionRecord {

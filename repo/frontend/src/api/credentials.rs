@@ -95,8 +95,16 @@ pub async fn list_credentials(
     parse_json(resp).await
 }
 
+/// Backend response shape for a single credential GET.
+/// Backend returns `{ "credential": {...}, "watermark": "..." }`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CredentialDetail {
+    pub credential: CredentialRow,
+    pub watermark:  String,
+}
+
 /// Get a single credential (also logs a "viewed" audit entry on the backend).
-pub async fn get_credential(token: &str, id: Uuid) -> ApiResult<CredentialRow> {
+pub async fn get_credential(token: &str, id: Uuid) -> ApiResult<CredentialDetail> {
     let path = format!("/api/v1/credentials/{id}");
     let resp = signed_request("GET", &path, token, None::<&()>).await?;
     parse_json(resp).await

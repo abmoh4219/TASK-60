@@ -188,6 +188,24 @@ fn check_anomalies(item: &TransformedItem, issues: &mut Vec<String>) -> f64 {
         penalty += 15.0;
     }
 
+    // ── Departure in the past ─────────────────────────────────────────────
+    // Articles that reference a specific departure that has already occurred
+    // are stale operational data and should be penalised heavily.
+    if let Some(dep_date) = item.departure_date {
+        let today = Utc::now().date_naive();
+        if dep_date < today {
+            issues.push(format!("departure_in_past:{dep_date}"));
+            // Departed more than 7 days ago: heavy penalty (quarantine-grade).
+            // Departed within 7 days: moderate penalty (old but perhaps still useful).
+            let days_past = (today - dep_date).num_days();
+            if days_past > 7 {
+                penalty += 90.0; // ensures score falls below publishable threshold
+            } else {
+                penalty += 40.0;
+            }
+        }
+    }
+
     penalty
 }
 
@@ -230,7 +248,13 @@ async fn check_similarity(
         return Ok((false, None));
     }
 
-    let threshold = shared::rules::SIMILARITY_QUARANTINE as f32;
+    // Load similarity threshold from business rules (runtime-configurable).
+    let threshold: f32 = crate::domain::rules::repo::BusinessRuleRepo::new(pool)
+        .get_value("similarity_quarantine",
+                   &shared::rules::SIMILARITY_QUARANTINE.to_string())
+        .await
+        .parse::<f64>()
+        .unwrap_or(shared::rules::SIMILARITY_QUARANTINE) as f32;
 
     // similarity() returns float4 (real) in PostgreSQL, so we compare as real.
     // We cast the result to float8 for decoding into Rust f64.

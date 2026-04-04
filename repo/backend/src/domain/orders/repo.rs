@@ -185,36 +185,51 @@ impl<'a> OrderRepo<'a> {
         let per_page = params.pagination.per_page();
         let offset   = params.pagination.offset();
         let page     = params.pagination.page();
+        // Normalise free-text params: wrap in %…% for ILIKE; None → NULL.
+        let pax_name  = params.passenger_name.as_deref().filter(|s| !s.is_empty())
+            .map(|s| format!("%{}%", s.to_lowercase()));
+        let pax_phone = params.passenger_phone.as_deref().filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
 
         let total: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM orders
-             WHERE ($1::UUID IS NULL OR passenger_id = $1)
-               AND ($2::UUID IS NULL OR schedule_id  = $2)
-               AND ($3::TEXT IS NULL OR status       = $3)",
+            "SELECT COUNT(*) FROM orders o
+             JOIN passengers p ON p.id = o.passenger_id
+             WHERE ($1::UUID IS NULL OR o.passenger_id = $1)
+               AND ($2::UUID IS NULL OR o.schedule_id  = $2)
+               AND ($3::TEXT IS NULL OR o.status       = $3)
+               AND ($4::TEXT IS NULL OR LOWER(p.full_name) LIKE $4)
+               AND ($5::TEXT IS NULL OR p.phone_last4 LIKE '%' || $5 || '%')",
         )
         .bind(params.passenger_id)
         .bind(params.schedule_id)
         .bind(&params.status)
+        .bind(&pax_name)
+        .bind(&pax_phone)
         .fetch_one(self.0)
         .await
         .map_err(AppError::Database)?;
 
         let items: Vec<Order> = sqlx::query_as(
-            "SELECT id, order_number, passenger_id, schedule_id, seat_class_id,
-                    seat_number, status, fare_amount, fee_override_amount,
-                    fee_override_reason, hold_expires_at, cancellation_reason,
-                    refund_amount, disruption_flag, created_at, updated_at,
-                    created_by
-             FROM orders
-             WHERE ($1::UUID IS NULL OR passenger_id = $1)
-               AND ($2::UUID IS NULL OR schedule_id  = $2)
-               AND ($3::TEXT IS NULL OR status       = $3)
-             ORDER BY created_at DESC
-             LIMIT $4 OFFSET $5",
+            "SELECT o.id, o.order_number, o.passenger_id, o.schedule_id, o.seat_class_id,
+                    o.seat_number, o.status, o.fare_amount, o.fee_override_amount,
+                    o.fee_override_reason, o.hold_expires_at, o.cancellation_reason,
+                    o.refund_amount, o.disruption_flag, o.created_at, o.updated_at,
+                    o.created_by
+             FROM orders o
+             JOIN passengers p ON p.id = o.passenger_id
+             WHERE ($1::UUID IS NULL OR o.passenger_id = $1)
+               AND ($2::UUID IS NULL OR o.schedule_id  = $2)
+               AND ($3::TEXT IS NULL OR o.status       = $3)
+               AND ($4::TEXT IS NULL OR LOWER(p.full_name) LIKE $4)
+               AND ($5::TEXT IS NULL OR p.phone_last4 LIKE '%' || $5 || '%')
+             ORDER BY o.created_at DESC
+             LIMIT $6 OFFSET $7",
         )
         .bind(params.passenger_id)
         .bind(params.schedule_id)
         .bind(&params.status)
+        .bind(&pax_name)
+        .bind(&pax_phone)
         .bind(per_page)
         .bind(offset)
         .fetch_all(self.0)

@@ -31,7 +31,7 @@ use crate::auth::rbac::{
 use crate::rules::RulesEngine;
 use crate::config::AppConfig;
 use crate::crypto;
-use crate::db::audit::write_audit;
+use crate::db::audit::{write_audit, write_audit_required};
 use crate::domain::orders::{
     models::{CancelOrder, FeeOverride, ListOrdersParams, NewOrder, NewOrderEvent, NewPassenger},
     repo::{OrderEventRepo, OrderRepo, PassengerRepo},
@@ -62,13 +62,17 @@ pub struct CreatePassengerBody {
 
 #[derive(Debug, Deserialize)]
 pub struct OrderListQuery {
-    pub passenger_id: Option<Uuid>,
-    pub schedule_id:  Option<Uuid>,
-    pub status:       Option<String>,
+    pub passenger_id:    Option<Uuid>,
+    pub schedule_id:     Option<Uuid>,
+    pub status:          Option<String>,
+    /// Free-text passenger name search (ILIKE).
+    pub passenger_name:  Option<String>,
+    /// Partial phone last-4 search.
+    pub passenger_phone: Option<String>,
     #[serde(default = "default_page")]
-    pub page:         i64,
+    pub page:            i64,
     #[serde(default = "default_per_page")]
-    pub per_page:     i64,
+    pub per_page:        i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,10 +225,12 @@ pub async fn list_orders(
     _auth: RequireViewOrders,
 ) -> AppResult<HttpResponse> {
     let params = ListOrdersParams {
-        passenger_id: query.passenger_id,
-        schedule_id:  query.schedule_id,
-        status:       query.status.clone(),
-        pagination:   PaginationParams {
+        passenger_id:    query.passenger_id,
+        schedule_id:     query.schedule_id,
+        status:          query.status.clone(),
+        passenger_name:  query.passenger_name.clone(),
+        passenger_phone: query.passenger_phone.clone(),
+        pagination:      PaginationParams {
             page:     Some(query.page),
             per_page: Some(query.per_page),
         },
@@ -398,12 +404,13 @@ pub async fn cancel_order(
         })),
     }).await?;
 
-    write_audit(&pool, "order_cancelled", "orders", Some(id), Some(auth.id),
+    write_audit_required(
+        &pool, "order_cancelled", "orders", Some(id), Some(auth.id),
         "cancel_order",
         None,
         Some(json!({ "reason": &body.reason, "disruption_flag": body.disruption_flag })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }
@@ -469,7 +476,7 @@ pub async fn process_refund(
         })),
     }).await?;
 
-    write_audit(
+    write_audit_required(
         &pool, "order_refunded", "orders", Some(id), Some(auth.id),
         "process_refund",
         None,
@@ -480,7 +487,7 @@ pub async fn process_refund(
             "reason":      &decision.reason,
         })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({
         "ok":         true,
@@ -519,12 +526,13 @@ pub async fn apply_fee_override(
         data:         Some(json!({ "override_amount": body.override_amount })),
     }).await?;
 
-    write_audit(&pool, "fee_override_applied", "orders", Some(id), Some(auth.id),
+    write_audit_required(
+        &pool, "fee_override_applied", "orders", Some(id), Some(auth.id),
         "fee_override",
         None,
         Some(json!({ "override_amount": body.override_amount, "reason": &body.reason })),
         None,
-    ).await;
+    ).await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true })))
 }

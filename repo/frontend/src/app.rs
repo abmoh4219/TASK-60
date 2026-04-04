@@ -104,11 +104,21 @@ fn switch(route: Route) -> Html {
 
         // ── Staff-facing ──────────────────────────────────────────────────
         Route::Login        => html! { <LoginPage /> },
-        Route::OpsSchedules => html! { <OpsSchedulesPage /> },
-        Route::OpsOrders    => html! { <OpsOrdersPage /> },
-        Route::OpsRules     => html! { <OpsRulesPage /> },
-        Route::OpsStaffing    => html! { <OpsStaffingPage /> },
-        Route::OpsCredentials => html! { <OpsCredentialsPage /> },
+        Route::OpsSchedules => html! {
+            <RequireAuth><OpsSchedulesPage /></RequireAuth>
+        },
+        Route::OpsOrders    => html! {
+            <RequireAuth><OpsOrdersPage /></RequireAuth>
+        },
+        Route::OpsRules     => html! {
+            <RequireAuth><OpsRulesPage /></RequireAuth>
+        },
+        Route::OpsStaffing    => html! {
+            <RequireAuth><OpsStaffingPage /></RequireAuth>
+        },
+        Route::OpsCredentials => html! {
+            <RequireAuth><OpsCredentialsPage /></RequireAuth>
+        },
 
         Route::NotFound => html! {
             <div class="flex items-center justify-center min-h-screen">

@@ -37,7 +37,8 @@ Open **https://localhost:8443** in your browser.
 
 - `#/` → Kiosk (public article search, archive, categories)
 - `#/login` → Staff login
-- `#/ops` → Operations console (schedules, orders, passengers)
+- `#/ops/schedules` → Operations console — schedules (default after login)
+- `#/ops/orders` → Operations console — orders & passengers
 - `#/ops/rules` → Business rules (Admin only)
 - `#/ops/staffing` → Staffing dispatch
 - `#/ops/credentials` → Credential management

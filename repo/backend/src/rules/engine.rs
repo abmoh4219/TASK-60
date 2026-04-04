@@ -95,10 +95,11 @@ impl<'a> RulesEngine<'a> {
             .parse()
             .unwrap_or_else(|_| rules::REFUND_PROCESSING_FEE_USD.parse().expect("valid constant"));
 
-        // Signed — negative means the departure is already past.
-        let hours_until = (departure_time - Utc::now()).num_hours();
+        // Use minutes for sub-hour precision; convert back to fractional hours for messages.
+        let mins_until   = (departure_time - Utc::now()).num_minutes();
+        let hours_until  = mins_until / 60; // truncated, kept for display only
 
-        let (outcome, max_amount, reason) = if hours_until > full_hours {
+        let (outcome, max_amount, reason) = if mins_until > full_hours * 60 {
             let amt = (fare_amount - processing_fee).max(Decimal::ZERO);
             (
                 RefundOutcome::FullMinusFee,
@@ -108,7 +109,7 @@ impl<'a> RulesEngine<'a> {
                     hours_until, full_hours, processing_fee,
                 ),
             )
-        } else if hours_until > partial_hours {
+        } else if mins_until > partial_hours * 60 {
             let half = Decimal::new(5, 1); // 0.5
             let amt  = (fare_amount * half).round_dp(2);
             (

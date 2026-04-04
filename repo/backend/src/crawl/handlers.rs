@@ -93,6 +93,42 @@ pub async fn create_task(
     path:  web::Path<Uuid>,
     body:  web::Json<CreateTaskBody>,
 ) -> AppResult<HttpResponse> {
+    // Validate task_name.
+    if body.task_name.trim().is_empty() {
+        return Err(AppError::Validation("task_name is required".into()));
+    }
+
+    // Validate pagination_rules schema: must be a JSON object with known keys only.
+    if let Some(rules) = &body.pagination_rules {
+        let obj = rules.as_object().ok_or_else(|| {
+            AppError::Validation("pagination_rules must be a JSON object".into())
+        })?;
+
+        for (key, val) in obj {
+            match key.as_str() {
+                "max_pages" => {
+                    if !val.is_number() || val.as_i64().map(|n| n < 1).unwrap_or(true) {
+                        return Err(AppError::Validation(
+                            "pagination_rules.max_pages must be a positive integer".into(),
+                        ));
+                    }
+                }
+                "max_items" => {
+                    if !val.is_number() || val.as_i64().map(|n| n < 1).unwrap_or(true) {
+                        return Err(AppError::Validation(
+                            "pagination_rules.max_items must be a positive integer".into(),
+                        ));
+                    }
+                }
+                other => {
+                    return Err(AppError::Validation(format!(
+                        "Unknown pagination_rules key '{other}'; allowed: max_pages, max_items"
+                    )));
+                }
+            }
+        }
+    }
+
     // Confirm the source exists.
     CrawlSourceRepo::new(&pool)
         .find_by_id(*path)

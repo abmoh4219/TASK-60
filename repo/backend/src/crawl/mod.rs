@@ -12,3 +12,4 @@ pub mod handlers;
 pub mod pipeline;
 pub mod quality;
 pub mod reader;
+pub mod schedule_pipeline;

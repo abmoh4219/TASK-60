@@ -132,11 +132,14 @@ pub struct FeeOverride {
 /// Query params for listing orders.
 #[derive(Debug, Default, Deserialize)]
 pub struct ListOrdersParams {
-    pub passenger_id: Option<Uuid>,
-    pub schedule_id:  Option<Uuid>,
-    pub status:       Option<String>,
+    pub passenger_id:    Option<Uuid>,
+    pub schedule_id:     Option<Uuid>,
+    pub status:          Option<String>,
+    /// Free-text search against passenger name (ILIKE) or phone_last4.
+    pub passenger_name:  Option<String>,
+    pub passenger_phone: Option<String>,
     #[serde(flatten)]
-    pub pagination:   PaginationParams,
+    pub pagination:      PaginationParams,
 }
 
 // ── Order event ───────────────────────────────────────────────────────────────

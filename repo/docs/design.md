@@ -2,7 +2,7 @@
 
 ## Overview
 
-RailOps is a multi-tenant railway operations platform. It consists of:
+RailOps is a single-tenant railway operations platform. It consists of:
 
 - **Backend** — Actix-web 4 (Rust), async, stateless
 - **Frontend** — Yew 0.21 (Rust → WASM), HashRouter, single-page app
@@ -70,7 +70,7 @@ sig     = hex(HMAC-SHA256(key=session_token, data=message))
 - With query: `/api/v1/ops/orders?page=2&per_page=20`
 
 The backend rejects requests where:
-- `|server_time - X-RailOps-Ts| > 300 seconds` (replay protection)
+- `|server_time - X-RailOps-Ts| > 120 seconds` (replay protection)
 - HMAC signature does not match (tamper detection)
 
 Session tokens are 32 random bytes (base64-encoded), stored in `sessions` table, scoped to one user and one IP address (recorded at login).
@@ -86,7 +86,7 @@ Roles are defined in `shared::UserRole`:
 | `admin` | Full access to all endpoints |
 | `ops_agent` | View/edit schedules and orders; upload/view credentials |
 | `dispatcher` | View/edit staffing; approve credentials; manage subscriptions |
-| `cs_agent` | Read-only order/passenger search |
+| `cs_agent` | View orders/schedules/content; manage orders; process refunds; apply fee overrides |
 
 RBAC is enforced in backend extractors (`RequireRole`, `RequireAdmin`, etc.) — the frontend mirrors these checks for UX only and is not the security boundary.
 
@@ -104,9 +104,9 @@ RBAC is enforced in backend extractors (`RequireRole`, `RequireAdmin`, etc.) —
 - All cookies (if used) would be `Secure; SameSite=Strict`
 
 ### Data at Rest
-- **PII**: passenger names, emails, phone numbers are AES-256-GCM encrypted; decrypted only when returned via authenticated API
 - **Credential files**: stored as AES-256-GCM ciphertext under `$UPLOAD_DIR/contractors/{contractor_id}/{fp8}_{filename}`
-- **Key**: `AES_KEY` environment variable (32-byte hex); rotatable without DB migration (files must be re-encrypted)
+- **Key derivation**: the encryption key is derived from the `SESSION_SECRET` environment variable using HKDF. There is no separate `AES_KEY` env var; changing `SESSION_SECRET` requires re-encrypting stored credential files.
+- **PII**: passenger phone numbers are stored in masked form (`***-***-NNNN`); full PII purge is supported via the PII-purge background task.
 
 ### File Upload Validation
 Credentials are validated at two layers:
@@ -156,8 +156,9 @@ The crawl engine scores each ingested article on three axes:
 | Delay article older than 30 days | −25 | `stale_disruption_notice` |
 | Fare article with no source URL | −15 | `fare_article_missing_source` |
 
-Articles scoring below `crawl.quality_threshold` (default 60) are quarantined and not published.  
-Articles with pg_trgm similarity ≥ `crawl.quarantine_similarity` (default 0.92) against existing content are quarantined as near-duplicates.
+Articles scoring below `quality_publish_threshold` (default 85) are not auto-published.  
+Articles with pg_trgm similarity ≥ `similarity_quarantine` (default 0.92) against existing content are quarantined as near-duplicates.  
+Both thresholds are loaded from `business_rules` at runtime.
 
 ---
 
@@ -182,13 +183,21 @@ Each scored candidate carries three human-readable `match_reasons` strings store
 All policy thresholds are stored in the `business_rules` table and loaded per-request. The `rules::engine::RulesEngine` struct is stateless; it fetches values from the DB with fallback to `shared::rules` constants:
 
 ```
-refund.full_minus_fee_hours  (default: 24)
-refund.partial_hours         (default:  2)
-refund.service_fee_pct       (default: 0.10)
-hold.ttl_minutes             (default: 30)
-crawl.quality_threshold      (default: 60.0)
-crawl.quarantine_similarity  (default: 0.92)
+refund_full_hours             (default: 24)
+refund_partial_hours          (default:  2)
+refund_processing_fee_usd     (default: 5.00)
+order_hold_ttl_minutes        (default: 15)
+quality_publish_threshold     (default: 85)
+similarity_quarantine         (default: 0.92)
+session_idle_minutes          (default: 30)
+rate_limit_rpm                (default: 60)
 ```
+
+All rules are stored in the `business_rules` table, editable via the API, and loaded at runtime with fallback to `shared::rules` constants. Key runtime-configurable controls:
+- **Session idle timeout**: loaded per-request in auth middleware
+- **Rate limit RPM**: reloaded every 120s by the eviction task
+- **Quality publish threshold**: loaded per-ingest in crawl engine
+- **Similarity quarantine threshold**: loaded per-score in quality scorer
 
 `evaluate_refund()` returns a `RefundDecision { outcome, max_amount, reason }`:
 - `FullMinusFee`: departure > 24 h away

@@ -284,6 +284,21 @@ pub struct CreatedOrder {
     pub order_number: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct RebookBody {
+    pub new_schedule_id:   String,
+    pub new_seat_class_id: Option<String>,
+    pub new_seat_number:   Option<String>,
+    pub new_fare_amount:   Option<String>,
+    pub reason:            Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct RebookedOrder {
+    pub new_order_id:     String,
+    pub new_order_number: String,
+}
+
 // ── API functions — reference data ────────────────────────────────────────────
 
 pub async fn list_routes(token: &str) -> ApiResult<Vec<RouteItem>> {
@@ -381,11 +396,13 @@ pub async fn request_pii_purge(token: &str, passenger_id: &str) -> ApiResult<()>
 // ── API functions — orders ────────────────────────────────────────────────────
 
 pub async fn list_orders(
-    token:        &str,
-    passenger_id: Option<&str>,
-    schedule_id:  Option<&str>,
-    status:       Option<&str>,
-    page:         i64,
+    token:            &str,
+    passenger_id:     Option<&str>,
+    schedule_id:      Option<&str>,
+    status:           Option<&str>,
+    passenger_name:   Option<&str>,
+    passenger_phone:  Option<&str>,
+    page:             i64,
 ) -> ApiResult<Page<OrderItem>> {
     let mut url = format!("/api/v1/ops/orders?page={page}&per_page=20");
     if let Some(p) = passenger_id.filter(|s| !s.is_empty()) {
@@ -396,6 +413,12 @@ pub async fn list_orders(
     }
     if let Some(s) = status.filter(|s| !s.is_empty()) {
         url.push_str(&format!("&status={s}"));
+    }
+    if let Some(n) = passenger_name.filter(|s| !s.is_empty()) {
+        url.push_str(&format!("&passenger_name={}", urlenc(n)));
+    }
+    if let Some(p) = passenger_phone.filter(|s| !s.is_empty()) {
+        url.push_str(&format!("&passenger_phone={}", urlenc(p)));
     }
     let resp = signed_request("GET", &url, token, None::<&()>).await?;
     parse_json(resp).await
@@ -451,6 +474,16 @@ pub async fn flag_disruption(token: &str, id: &str) -> ApiResult<()> {
     signed_request("POST", &format!("/api/v1/ops/orders/{id}/disruption"), token, None::<&()>)
         .await?;
     Ok(())
+}
+
+pub async fn rebook_order(token: &str, id: &str, body: &RebookBody) -> ApiResult<RebookedOrder> {
+    let resp = signed_request(
+        "POST",
+        &format!("/api/v1/ops/orders/{id}/rebook"),
+        token,
+        Some(body),
+    ).await?;
+    parse_json(resp).await
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

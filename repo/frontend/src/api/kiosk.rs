@@ -143,6 +143,7 @@ pub async fn search_content(
     q:              Option<&str>,
     category:       Option<&str>,
     tag:            Option<&str>,
+    city:           Option<&str>,
     departure_from: Option<&str>,
     departure_to:   Option<&str>,
     page:           i64,
@@ -157,6 +158,9 @@ pub async fn search_content(
     }
     if let Some(t) = tag.filter(|s| !s.is_empty()) {
         url.push_str(&format!("&tag={}", urlenc(t)));
+    }
+    if let Some(ci) = city.filter(|s| !s.is_empty()) {
+        url.push_str(&format!("&city={}", urlenc(ci)));
     }
     if let Some(df) = departure_from.filter(|s| !s.is_empty()) {
         url.push_str(&format!("&departure_from={}", urlenc(df)));
@@ -174,23 +178,29 @@ pub async fn get_article(slug: &str) -> ApiResult<ArticleResponse> {
 
 /// Archive index (year/month buckets) or filtered articles.
 pub async fn get_archive_index(
-    year:     Option<i32>,
-    category: Option<&str>,
+    year:       Option<i32>,
+    category:   Option<&str>,
+    route_code: Option<&str>,
 ) -> ApiResult<ArchiveIndexResponse> {
     let mut url = "/api/v1/kiosk/archive?".to_owned();
     if let Some(y) = year     { url.push_str(&format!("year={y}&")); }
     if let Some(c) = category { url.push_str(&format!("category={}&", urlenc(c))); }
+    if let Some(r) = route_code.filter(|s| !s.is_empty()) { url.push_str(&format!("route_code={}&", urlenc(r))); }
     get_public(&url).await
 }
 
 pub async fn get_archive_articles(
-    year:     i32,
-    month:    i32,
-    category: Option<&str>,
-    page:     i64,
+    year:       i32,
+    month:      i32,
+    day:        Option<i32>,
+    category:   Option<&str>,
+    route_code: Option<&str>,
+    page:       i64,
 ) -> ApiResult<ArchiveArticlesResponse> {
     let mut url = format!("/api/v1/kiosk/archive?year={year}&month={month}&page={page}");
+    if let Some(d) = day { url.push_str(&format!("&day={d}")); }
     if let Some(c) = category { url.push_str(&format!("&category={}", urlenc(c))); }
+    if let Some(r) = route_code.filter(|s| !s.is_empty()) { url.push_str(&format!("&route_code={}", urlenc(r))); }
     get_public(&url).await
 }
 

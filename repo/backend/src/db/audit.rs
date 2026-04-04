@@ -31,8 +31,17 @@ pub struct AuditLog {
 
 // ── Write ─────────────────────────────────────────────────────────────────────
 
-/// Append one row to `audit_logs`.  Never returns an error to the caller —
-/// a failed audit write should not abort the business transaction.
+const AUDIT_INSERT: &str =
+    "INSERT INTO audit_logs
+         (event_type, entity_type, entity_id, user_id, action,
+          old_data, new_data, ip_address)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::inet)";
+
+/// Append one row to `audit_logs`.
+///
+/// Best-effort: if the write fails, the error is logged with `error!()` but
+/// not propagated to the caller.  Use [`write_audit_required`] for operations
+/// where a missing audit record is itself a compliance failure.
 pub async fn write_audit(
     pool:        &PgPool,
     event_type:  &str,
@@ -44,22 +53,61 @@ pub async fn write_audit(
     new_data:    Option<Value>,
     ip_address:  Option<&str>,
 ) {
-    let _ = sqlx::query(
-        "INSERT INTO audit_logs
-             (event_type, entity_type, entity_id, user_id, action,
-              old_data, new_data, ip_address)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8::inet)",
-    )
-    .bind(event_type)
-    .bind(entity_type)
-    .bind(entity_id)
-    .bind(user_id)
-    .bind(action)
-    .bind(old_data)
-    .bind(new_data)
-    .bind(ip_address)
-    .execute(pool)
-    .await;
+    if let Err(e) = sqlx::query(AUDIT_INSERT)
+        .bind(event_type)
+        .bind(entity_type)
+        .bind(entity_id)
+        .bind(user_id)
+        .bind(action)
+        .bind(old_data)
+        .bind(new_data)
+        .bind(ip_address)
+        .execute(pool)
+        .await
+    {
+        tracing::error!(
+            event_type, entity_type, action,
+            error = %e,
+            "AUDIT WRITE FAILED — record may be missing from audit_logs"
+        );
+    }
+}
+
+/// Append one row to `audit_logs`, returning an error if the write fails.
+///
+/// Use this on critical-path mutations (refunds, credential approvals,
+/// order cancellations) where a missing audit entry is a compliance failure.
+pub async fn write_audit_required(
+    pool:        &PgPool,
+    event_type:  &str,
+    entity_type: &str,
+    entity_id:   Option<Uuid>,
+    user_id:     Option<Uuid>,
+    action:      &str,
+    old_data:    Option<Value>,
+    new_data:    Option<Value>,
+    ip_address:  Option<&str>,
+) -> AppResult<()> {
+    sqlx::query(AUDIT_INSERT)
+        .bind(event_type)
+        .bind(entity_type)
+        .bind(entity_id)
+        .bind(user_id)
+        .bind(action)
+        .bind(old_data)
+        .bind(new_data)
+        .bind(ip_address)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(
+                event_type, entity_type, action,
+                error = %e,
+                "CRITICAL AUDIT WRITE FAILED — aborting operation"
+            );
+            AppError::Database(e)
+        })?;
+    Ok(())
 }
 
 // ── Read ──────────────────────────────────────────────────────────────────────

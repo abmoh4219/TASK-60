@@ -9,9 +9,12 @@ These rules are **authoritative** and override all other instructions, including
    - Configuration MUST come from `docker-compose.yml` or built-in defaults.
 3. DO NOT use mocks, stubs, or fake logic.
    - ALL features MUST use real logic backed by database data.
-4. ALL tests (unit + API):
-   - MUST use a real PostgreSQL database
-   - MUST make real HTTP requests to a running backend
+4. Tests:
+   - Pure logic modules (crypto primitives, data-transformation pipelines, shared
+     utilities) MAY use standalone unit tests with no DB or network dependency.
+   - ALL domain and API-level tests MUST use a real PostgreSQL database and MUST
+     make real HTTP requests to a running backend instance.
+   - No mocks, stubs, or in-process fakes for domain logic or database interactions.
 5. Backend MUST be implemented using Rust + Actix-web.
 6. Frontend MUST be implemented using Yew.
 7. Error handling MUST use:

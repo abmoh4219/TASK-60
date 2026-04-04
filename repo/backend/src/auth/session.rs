@@ -40,10 +40,14 @@ pub async fn create_session(
     Ok((raw_token, expires_at))
 }
 
-/// Load a session that is not expired (absolute) and not idle (30 min).
+/// Load a session that is not expired (absolute) and not idle.
+///
+/// `idle_minutes` is loaded from the `session_idle_minutes` business rule
+/// at the middleware layer, allowing runtime configuration without restarts.
 pub async fn find_active_session(
-    pool:       &PgPool,
-    token_hash: &str,
+    pool:         &PgPool,
+    token_hash:   &str,
+    idle_minutes: i64,
 ) -> AppResult<Option<SessionRecord>> {
     let row = sqlx::query_as::<_, SessionRecord>(
         "SELECT u.id        AS user_id,
@@ -51,15 +55,17 @@ pub async fn find_active_session(
                 u.role,
                 u.full_name,
                 s.expires_at,
-                s.last_active_at
+                s.last_active_at,
+                HOST(s.ip_address) AS ip_address
          FROM   sessions s
          JOIN   users    u ON u.id = s.user_id
          WHERE  s.token_hash    = $1
            AND  s.expires_at    > NOW()
-           AND  s.last_active_at > NOW() - INTERVAL '30 minutes'
+           AND  s.last_active_at > NOW() - ($2 || ' minutes')::INTERVAL
            AND  u.is_active     = TRUE",
     )
     .bind(token_hash)
+    .bind(idle_minutes.to_string())
     .fetch_optional(pool)
     .await?;
 

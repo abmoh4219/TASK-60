@@ -33,7 +33,7 @@ use uuid::Uuid;
 use shared::rules::MAX_UPLOAD_BYTES;
 
 use crate::auth::rbac::{RequireApproveCredentials, RequireViewCredentials};
-use crate::db::audit::write_audit;
+use crate::db::audit::{write_audit, write_audit_required};
 use crate::domain::credentials::{
     models::{CreateCredential, CreateEsignature},
     repo::{CredAuditRepo, CredentialRepo, EsignatureRepo},
@@ -366,7 +366,7 @@ pub async fn review_credential(
         .insert(id, action, Some(auth.id), None, None, data.clone())
         .await?;
 
-    write_audit(
+    write_audit_required(
         &pool,
         "credential_reviewed", "credential", Some(id),
         Some(auth.id), action,
@@ -374,7 +374,7 @@ pub async fn review_credential(
         Some(json!({ "status": &body.status, "notes": &body.review_notes })),
         None,
     )
-    .await;
+    .await?;
 
     Ok(HttpResponse::Ok().json(json!({ "ok": true, "status": &body.status })))
 }
@@ -499,10 +499,13 @@ pub async fn list_esignatures(
 }
 
 /// POST /esignatures — create an internal e-signature for any supported entity.
+///
+/// Requires `ApproveCredentials` (Admin or Dispatcher).  Credential viewers
+/// (OpsAgent) may not perform write-sign actions.
 pub async fn create_esignature(
     pool:  web::Data<sqlx::PgPool>,
     body:  web::Json<CreateEsignBody>,
-    auth:  RequireViewCredentials,
+    auth:  RequireApproveCredentials,
 ) -> AppResult<HttpResponse> {
     if !matches!(
         body.entity_type.as_str(),
@@ -514,6 +517,41 @@ pub async fn create_esignature(
     }
     if body.signer_name.trim().is_empty() {
         return Err(AppError::Validation("signer_name is required".into()));
+    }
+
+    // Validate that the target entity exists before creating an orphaned signature.
+    let entity_exists: bool = match body.entity_type.as_str() {
+        "credential" => sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM credentials WHERE id = $1)",
+        )
+        .bind(body.entity_id)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(AppError::Database)?,
+
+        "order" => sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM orders WHERE id = $1)",
+        )
+        .bind(body.entity_id)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(AppError::Database)?,
+
+        "assignment" => sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM shift_assignments WHERE id = $1)",
+        )
+        .bind(body.entity_id)
+        .fetch_one(pool.get_ref())
+        .await
+        .map_err(AppError::Database)?,
+
+        _ => false,
+    };
+    if !entity_exists {
+        return Err(AppError::NotFound(format!(
+            "{} {} not found",
+            body.entity_type, body.entity_id
+        )));
     }
     let signed_date = NaiveDate::parse_from_str(&body.signed_date, "%Y-%m-%d")
         .map_err(|_| AppError::Validation("signed_date must be YYYY-MM-DD".into()))?;
@@ -684,10 +722,25 @@ pub async fn download_credential(
     )
     .await;
 
-    let filename = &cred.file_name;
+    // Sanitize filename for RFC 6266-safe Content-Disposition header:
+    // strip directory separators and replace any character that is not
+    // alphanumeric, hyphen, underscore, period, or space with an underscore.
+    let safe_filename: String = cred
+        .file_name
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let safe_filename = safe_filename.trim_matches('.').trim();
+
     Ok(HttpResponse::Ok()
         .insert_header(("Content-Type",        cred.mime_type.as_str()))
-        .insert_header(("Content-Disposition", format!("attachment; filename=\"{filename}\"")))
+        .insert_header(("Content-Disposition", format!("attachment; filename=\"{safe_filename}\"")))
         .insert_header(("X-Watermark",         watermark_text))
         .body(output))
 }

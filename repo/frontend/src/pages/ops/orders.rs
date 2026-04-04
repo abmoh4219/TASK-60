@@ -15,7 +15,7 @@ use shared::UserRole;
 use crate::api::ops::{
     self as ops_api,
     CancelBody, FeeOverrideBody, OrderDetailResponse, OrderItem, Page,
-    PassengerItem, RefundBody,
+    PassengerItem, RebookBody, RefundBody,
 };
 use crate::app::Route;
 use crate::auth::AuthContext;
@@ -37,7 +37,7 @@ pub fn ops_orders_page() -> Html {
 
     let can_manage_orders  = matches!(user.role, UserRole::Admin | UserRole::OpsAgent | UserRole::CsAgent);
     let can_process_refund = matches!(user.role, UserRole::Admin | UserRole::OpsAgent | UserRole::CsAgent);
-    let can_override_fee   = matches!(user.role, UserRole::Admin | UserRole::OpsAgent);
+    let can_override_fee   = matches!(user.role, UserRole::Admin | UserRole::OpsAgent | UserRole::CsAgent);
 
     let toasts = use_toasts();
 
@@ -63,13 +63,14 @@ pub fn ops_orders_page() -> Html {
     let order_detail      = use_state(|| None::<OrderDetailResponse>);
     let detail_loading    = use_state(|| false);
 
-    // ── Action forms: 0=none 1=confirm 2=cancel 3=refund 4=fee-override 5=disruption
-    let action         = use_state(|| 0u8);
-    let form_reason    = use_state(String::new);
-    let form_amount    = use_state(String::new);
-    let form_disrupt   = use_state(|| false);
-    let action_err     = use_state(|| None::<String>);
-    let action_ok      = use_state(|| false);
+    // ── Action forms: 0=none 1=confirm 2=cancel 3=refund 4=fee-override 5=disruption 6=rebook
+    let action          = use_state(|| 0u8);
+    let form_reason     = use_state(String::new);
+    let form_amount     = use_state(String::new);
+    let form_disrupt    = use_state(|| false);
+    let form_schedule   = use_state(String::new);  // for rebook
+    let action_err      = use_state(|| None::<String>);
+    let action_ok       = use_state(|| false);
 
     // ── Load orders ───────────────────────────────────────────────────────
     {
@@ -85,11 +86,20 @@ pub fn ops_orders_page() -> Html {
                 loading.set(true);
                 spawn_local(async move {
                     let result = if !search.is_empty() && search.starts_with("ORD-") {
+                        // Exact order-number lookup
                         ops_api::find_order_by_number(&token, &search).await
                             .map(|o| Page { items: vec![o], total: 1, page: 1, per_page: 20, total_pages: 1 })
+                    } else if !search.is_empty() {
+                        // Free-text: search by passenger name OR phone last-4 (digits only)
+                        let is_digits = search.chars().all(|c| c.is_ascii_digit());
+                        let (pax_name, pax_phone) = if is_digits {
+                            (None, Some(search.as_str()))
+                        } else {
+                            (Some(search.as_str()), None)
+                        };
+                        ops_api::list_orders(&token, None, None, Some(&status), pax_name, pax_phone, pg).await
                     } else {
-                        let pax_id = if !search.is_empty() { None } else { None };
-                        ops_api::list_orders(&token, pax_id, None, Some(&status), pg).await
+                        ops_api::list_orders(&token, None, None, Some(&status), None, None, pg).await
                     };
                     match result {
                         Ok(p)  => { orders.set(Some(p)); loading.set(false); }
@@ -155,18 +165,46 @@ pub fn ops_orders_page() -> Html {
         let (token, order_detail, selected_order_id) =
             (token.clone(), order_detail.clone(), selected_order_id.clone());
         let (action, action_err, action_ok) = (action.clone(), action_err.clone(), action_ok.clone());
-        let (form_reason, form_amount, form_disrupt) =
-            (form_reason.clone(), form_amount.clone(), form_disrupt.clone());
+        let (form_reason, form_amount, form_disrupt, form_schedule) =
+            (form_reason.clone(), form_amount.clone(), form_disrupt.clone(), form_schedule.clone());
         let toast_push = toasts.push.clone();
         Callback::from(move |kind: u8| {
             let id = match (*selected_order_id).clone() { Some(i) => i, None => return };
-            let reason   = (*form_reason).trim().to_owned();
-            let amount   = (*form_amount).trim().to_owned();
-            let disrupt  = *form_disrupt;
+            let reason    = (*form_reason).trim().to_owned();
+            let amount    = (*form_amount).trim().to_owned();
+            let disrupt   = *form_disrupt;
+            let schedule  = (*form_schedule).trim().to_owned();
             let (token, order_detail, action, action_err, action_ok) =
                 (token.clone(), order_detail.clone(), action.clone(), action_err.clone(), action_ok.clone());
             let toast_push = toast_push.clone();
             spawn_local(async move {
+                // Rebook returns a different type, handle separately.
+                if kind == 6 {
+                    match ops_api::rebook_order(&token, &id, &RebookBody {
+                        new_schedule_id:   schedule,
+                        new_seat_class_id: None,
+                        new_seat_number:   None,
+                        new_fare_amount:   None,
+                        reason:            if reason.is_empty() { None } else { Some(reason) },
+                    }).await {
+                        Ok(r) => {
+                            if let Ok(d) = ops_api::get_order(&token, &id).await {
+                                order_detail.set(Some(d));
+                            }
+                            action.set(0); action_err.set(None); action_ok.set(true);
+                            toast_push.emit((
+                                format!("Rebooked → {}", r.new_order_number),
+                                ToastKind::Success,
+                            ));
+                        }
+                        Err(e) => {
+                            let msg = e.message.clone();
+                            action_err.set(Some(e.message));
+                            toast_push.emit((msg, ToastKind::Error));
+                        }
+                    }
+                    return;
+                }
                 let result: Result<(), _> = match kind {
                     1 => ops_api::confirm_order(&token, &id).await,
                     2 => ops_api::cancel_order(&token, &id, &CancelBody {
@@ -318,7 +356,7 @@ pub fn ops_orders_page() -> Html {
                                             <div class="skeleton h-4 w-40"></div>
                                         </div>
                                     } else if let Some(resp) = &*order_detail {
-                                        { order_detail_html(resp, can_manage_orders, can_process_refund, can_override_fee, &action, &action_err, &action_ok, &form_reason, &form_amount, &form_disrupt, &dispatch_action) }
+                                        { order_detail_html(resp, can_manage_orders, can_process_refund, can_override_fee, &action, &action_err, &action_ok, &form_reason, &form_amount, &form_disrupt, &form_schedule, &dispatch_action) }
                                         <div class="px-5 py-3 border-t border-slate-100">
                                             <button
                                                 class="w-full flex items-center justify-center gap-1.5 text-xs
@@ -450,17 +488,18 @@ pub fn ops_orders_page() -> Html {
 
 #[allow(clippy::too_many_arguments)]
 fn order_detail_html(
-    resp:         &OrderDetailResponse,
-    can_manage:   bool,
-    can_refund:   bool,
-    can_fee:      bool,
-    action:       &UseStateHandle<u8>,
-    action_err:   &UseStateHandle<Option<String>>,
-    action_ok:    &UseStateHandle<bool>,
-    form_reason:  &UseStateHandle<String>,
-    form_amount:  &UseStateHandle<String>,
-    form_disrupt: &UseStateHandle<bool>,
-    dispatch:     &Callback<u8>,
+    resp:          &OrderDetailResponse,
+    can_manage:    bool,
+    can_refund:    bool,
+    can_fee:       bool,
+    action:        &UseStateHandle<u8>,
+    action_err:    &UseStateHandle<Option<String>>,
+    action_ok:     &UseStateHandle<bool>,
+    form_reason:   &UseStateHandle<String>,
+    form_amount:   &UseStateHandle<String>,
+    form_disrupt:  &UseStateHandle<bool>,
+    form_schedule: &UseStateHandle<String>,
+    dispatch:      &Callback<u8>,
 ) -> Html {
     let o = &resp.order;
     html! {
@@ -534,6 +573,9 @@ fn order_detail_html(
                         if !o.disruption_flag {
                             <ActionBtn label="Flag Disruption" kind=5u8 style="secondary" dispatch={dispatch.clone()} />
                         }
+                        if can_manage && matches!(o.status.as_str(), "confirmed" | "cancelled") {
+                            <ActionBtn label="Rebook" kind=6u8 style="secondary" dispatch={dispatch.clone()} />
+                        }
                     </div>
                 }
 
@@ -588,6 +630,22 @@ fn order_detail_html(
                             oninput={{ let s = form_reason.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
                         { err_html(action_err) }
                         { form_btns(dispatch, action, action_err, 4) }
+                    </div>
+                }
+
+                // Rebook form
+                if **action == 6 {
+                    <div class="space-y-2.5">
+                        <p class="text-xs font-semibold text-slate-600">{"Rebook onto New Schedule"}</p>
+                        <input type="text" placeholder="New schedule UUID (required)"
+                            class={input_cls()}
+                            value={(**form_schedule).clone()}
+                            oninput={{ let s = form_schedule.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
+                        <input type="text" placeholder="Reason (optional)"
+                            class={input_cls()}
+                            oninput={{ let s = form_reason.clone(); Callback::from(move |e: InputEvent| s.set(ev_input(&e))) }} />
+                        { err_html(action_err) }
+                        { form_btns(dispatch, action, action_err, 6) }
                     </div>
                 }
             </div>

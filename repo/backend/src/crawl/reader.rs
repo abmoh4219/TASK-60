@@ -197,3 +197,65 @@ pub fn reader_for(source_type: &str) -> Box<dyn SourceReader> {
         _                 => Box::new(LocalPackageReader),
     }
 }
+
+/// Read a page of raw JSON values from a directory, returning them as
+/// `serde_json::Value` so the caller can deserialize into any type.
+/// Used by the schedule aggregation pipeline.
+pub async fn read_schedule_page(
+    base_path: &str,
+    cursor:    Option<Value>,
+) -> Result<(Vec<super::schedule_pipeline::RawScheduleItem>, Option<Value>), String> {
+    let path = std::path::Path::new(base_path);
+    let mut files = collect_json_files(path).await
+        .map_err(|e| format!("Cannot read directory '{base_path}': {e}"))?;
+    files.sort();
+
+    if files.is_empty() {
+        return Ok((Vec::new(), None));
+    }
+
+    let cur = cursor.as_ref().map(FileCursor::from_value).unwrap_or_default();
+    let mut file_idx = cur.file_index;
+    let mut item_off = cur.item_offset;
+    let mut collected = Vec::with_capacity(PAGE_SIZE);
+
+    while collected.len() < PAGE_SIZE && file_idx < files.len() {
+        let file_path = &files[file_idx];
+        debug!(file = %file_path.display(), "Reading schedule source file");
+
+        let bytes = tokio::fs::read(file_path).await
+            .map_err(|e| format!("Cannot read '{}': {e}", file_path.display()))?;
+        let json: Value = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("JSON parse error in '{}': {e}", file_path.display()))?;
+        let items_json: Vec<Value> = match json {
+            Value::Array(arr)          => arr,
+            obj @ Value::Object(_)     => vec![obj],
+            _ => { file_idx += 1; item_off = 0; continue; }
+        };
+
+        let remaining = PAGE_SIZE - collected.len();
+        let start     = item_off.min(items_json.len());
+        let end       = (start + remaining).min(items_json.len());
+
+        for v in &items_json[start..end] {
+            match serde_json::from_value::<super::schedule_pipeline::RawScheduleItem>(v.clone()) {
+                Ok(item)  => collected.push(item),
+                Err(e)    => warn!("Skipping malformed schedule item: {e}"),
+            }
+        }
+
+        item_off = end;
+        if item_off >= items_json.len() {
+            file_idx += 1;
+            item_off  = 0;
+        }
+    }
+
+    let next_cursor = if file_idx < files.len() {
+        Some(FileCursor { file_index: file_idx, item_offset: item_off }.to_value())
+    } else {
+        None
+    };
+
+    Ok((collected, next_cursor))
+}

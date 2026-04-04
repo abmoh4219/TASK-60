@@ -330,16 +330,23 @@ pub fn ops_staffing_page() -> Html {
         })
     };
 
-    // ── Subscribe / unsubscribe ───────────────────────────────────────────
+    // ── Subscribe / unsubscribe (role-aware) ────────────────────────────
+    // Dispatchers subscribe as "dispatcher" to "shift" targets.
+    // Users with a linked contractor profile can subscribe as "contractor" to "route" targets.
+    let subscriber_type = if can_manage { "dispatcher" } else { "contractor" };
+
     let on_unsub = {
         let subs    = subs.clone();
         let sub_err = sub_err.clone();
         let token   = token.clone();
         Callback::from(move |(target_type, target_id): (String, String)| {
             let (subs, err, token) = (subs.clone(), sub_err.clone(), token.clone());
+            // Determine subscriber type from target type for accurate unsubscribe.
+            let sub_type = if target_type == "route" { "contractor" } else { "dispatcher" };
+            let sub_type = sub_type.to_owned();
             spawn_local(async move {
                 err.set(None);
-                match staffing_api::unsubscribe(&token, "dispatcher", &target_type, &target_id)
+                match staffing_api::unsubscribe(&token, &sub_type, &target_type, &target_id)
                     .await
                 {
                     Ok(_) => {
@@ -368,6 +375,34 @@ pub fn ops_staffing_page() -> Html {
                 err.set(None);
                 match staffing_api::subscribe(&token, "dispatcher", "shift", &id).await {
                     Ok(_) => {
+                        if let Ok(v) = staffing_api::list_subscriptions(&token).await {
+                            subs.set(Some(v));
+                        }
+                    }
+                    Err(e) => { err.set(Some(e.message)); }
+                }
+            });
+        })
+    };
+
+    // ── Contractor route subscription ────────────────────────────────────
+    let route_sub_input = use_state(String::new);
+
+    let on_sub_route = {
+        let subs         = subs.clone();
+        let sub_err      = sub_err.clone();
+        let token        = token.clone();
+        let route_input  = route_sub_input.clone();
+        Callback::from(move |_: MouseEvent| {
+            let route_id = (*route_input).trim().to_owned();
+            if route_id.is_empty() { return; }
+            let (subs, err, token, ri) =
+                (subs.clone(), sub_err.clone(), token.clone(), route_input.clone());
+            spawn_local(async move {
+                err.set(None);
+                match staffing_api::subscribe(&token, "contractor", "route", &route_id).await {
+                    Ok(_) => {
+                        ri.set(String::new());
                         if let Ok(v) = staffing_api::list_subscriptions(&token).await {
                             subs.set(Some(v));
                         }
@@ -588,6 +623,37 @@ pub fn ops_staffing_page() -> Html {
 
                             // ── Subscriptions ─────────────────────────────
                             { render_subscriptions(&subs, *subs_loading, sub_err.as_ref(), on_unsub.clone()) }
+
+                            // ── Route subscriptions (contractor flow) ─────
+                            <div class="bg-white rounded-xl border border-slate-200/80
+                                        shadow-card p-5 mt-4">
+                                <h3 class="text-sm font-semibold text-slate-800 mb-3">
+                                    {"Follow a Route"}
+                                </h3>
+                                <p class="text-xs text-slate-500 mb-3">
+                                    {"Subscribe as a contractor to receive notifications for a preferred route."}
+                                </p>
+                                <div class="flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Route ID (UUID)"
+                                        value={(*route_sub_input).clone()}
+                                        oninput={{
+                                            let ri = route_sub_input.clone();
+                                            Callback::from(move |e: InputEvent| {
+                                                let el: HtmlInputElement = e.target_unchecked_into();
+                                                ri.set(el.value());
+                                            })
+                                        }}
+                                        class={format!("{} flex-1", input_cls())}
+                                    />
+                                    <button
+                                        class={btn_primary()}
+                                        onclick={on_sub_route.clone()}>
+                                        {"Subscribe"}
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 }

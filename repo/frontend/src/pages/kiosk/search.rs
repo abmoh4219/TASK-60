@@ -29,6 +29,9 @@ pub struct SearchQuery {
     pub category:       Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag:            Option<String>,
+    /// City filter (matched against content city references).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub city:           Option<String>,
     /// ISO-8601 departure lower bound, e.g. `"2026-06-01"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub departure_from: Option<String>,
@@ -112,11 +115,12 @@ pub fn kiosk_search() -> Html {
                 let q              = params.q.as_deref();
                 let category       = params.category.as_deref();
                 let tag            = params.tag.as_deref();
+                let city           = params.city.as_deref();
                 let departure_from = params.departure_from.as_deref();
                 let departure_to   = params.departure_to.as_deref();
                 let page           = params.page.unwrap_or(1);
 
-                match kiosk::search_content(q, category, tag, departure_from, departure_to, page, 12).await {
+                match kiosk::search_content(q, category, tag, city, departure_from, departure_to, page, 12).await {
                     Ok(r)  => { results.set(Some(r)); loading.set(false); }
                     Err(e) => {
                         error.set(Some(e.message));
@@ -146,6 +150,20 @@ pub fn kiosk_search() -> Html {
             move || drop(handle)
         });
     }
+
+    // ── City filter handler ────────────────────────────────────────────────
+    let on_city_change = {
+        let navigator = navigator.clone();
+        let q = url_q.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: HtmlInputElement = e.target_unchecked_into();
+            let val = el.value();
+            let mut qq = q.clone();
+            qq.city = if val.is_empty() { None } else { Some(val) };
+            qq.page = None;
+            navigator.push_with_query(&Route::KioskSearch, &qq).ok();
+        })
+    };
 
     // ── Departure filter handlers ─────────────────────────────────────────
     let on_departure_from = {
@@ -230,6 +248,7 @@ pub fn kiosk_search() -> Html {
     let active_q           = url_q.q.as_deref().unwrap_or("").to_owned();
     let active_category    = url_q.category.clone();
     let active_tag         = url_q.tag.clone();
+    let active_city        = url_q.city.clone().unwrap_or_default();
     let active_dep_from    = url_q.departure_from.clone().unwrap_or_default();
     let active_dep_to      = url_q.departure_to.clone().unwrap_or_default();
 
@@ -268,8 +287,22 @@ pub fn kiosk_search() -> Html {
                     </Link<Route>>
                 </div>
 
-                // ── Departure window filter ───────────────────────────────
+                // ── City + Departure window filter ───────────────────────────
                 <div class="flex flex-wrap gap-3 mb-4">
+                    <div class="flex items-center gap-2">
+                        <label class="text-xs text-slate-500 font-medium whitespace-nowrap">
+                            {"City"}
+                        </label>
+                        <input
+                            type="text"
+                            placeholder="e.g. Denver"
+                            value={active_city.clone()}
+                            oninput={on_city_change}
+                            class="rounded-lg border border-slate-300 px-3 py-2 text-sm w-32 \
+                                   focus:border-indigo-500 focus:outline-none focus:ring-2 \
+                                   focus:ring-indigo-200"
+                        />
+                    </div>
                     <div class="flex items-center gap-2">
                         <label class="text-xs text-slate-500 font-medium whitespace-nowrap">
                             {"Departs from"}
@@ -299,7 +332,7 @@ pub fn kiosk_search() -> Html {
                 </div>
 
                 // ── Active filter chips ───────────────────────────────────
-                { active_chips(&active_category, &active_tag, &url_q, navigator.clone()) }
+                { active_chips(&active_category, &active_tag, &url_q.city, &url_q, navigator.clone()) }
 
                 <div class="flex gap-8">
                     // ── Sidebar ───────────────────────────────────────────
@@ -385,10 +418,11 @@ pub fn kiosk_search() -> Html {
 fn active_chips(
     category: &Option<String>,
     tag:      &Option<String>,
+    city:     &Option<String>,
     url_q:    &SearchQuery,
     nav:      Navigator,
 ) -> Html {
-    if category.is_none() && tag.is_none() {
+    if category.is_none() && tag.is_none() && city.is_none() {
         return html! {};
     }
     html! {
@@ -431,6 +465,28 @@ fn active_chips(
                                      text-slate-700 text-sm px-3 py-1 font-medium">
                             { format!("Tag: #{}", t2) }
                             <button onclick={onclick} class="ml-1 hover:text-slate-900">
+                                {"×"}
+                            </button>
+                        </span>
+                    }
+                } }
+            }
+            if let Some(ci) = city {
+                { {
+                    let mut q = url_q.clone();
+                    let nav2  = nav.clone();
+                    let ci2   = ci.clone();
+                    let onclick = Callback::from(move |_: MouseEvent| {
+                        let mut qq = q.clone();
+                        qq.city = None;
+                        qq.page = None;
+                        nav2.push_with_query(&Route::KioskSearch, &qq).ok();
+                    });
+                    html! {
+                        <span class="inline-flex items-center gap-1 rounded-full bg-sky-100
+                                     text-sky-800 text-sm px-3 py-1 font-medium">
+                            { format!("City: {}", ci2) }
+                            <button onclick={onclick} class="ml-1 text-sky-600 hover:text-sky-900">
                                 {"×"}
                             </button>
                         </span>

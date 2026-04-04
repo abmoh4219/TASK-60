@@ -10,6 +10,7 @@
 //!   Shows a paginated article grid for that calendar month with
 //!   an optional `category` filter in the sidebar.
 
+use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::spawn_local;
 use yew::prelude::*;
 use yew_router::prelude::*;
@@ -26,13 +27,17 @@ use crate::pages::kiosk::home::{article_card, footer, nav_bar};
 #[derive(Debug, Clone, PartialEq, serde::Deserialize, serde::Serialize, Default)]
 pub struct ArchiveQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub year:     Option<i32>,
+    pub year:       Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub month:    Option<i32>,
+    pub month:      Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<String>,
+    pub day:        Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub page:     Option<i64>,
+    pub category:   Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub route_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page:       Option<i64>,
 }
 
 // ── Internal data state ────────────────────────────────────────────────────────
@@ -85,14 +90,17 @@ pub fn kiosk_archive() -> Html {
                 match (p.year, p.month) {
                     (Some(y), Some(m)) => {
                         match kiosk::get_archive_articles(
-                            y, m, p.category.as_deref(), p.page.unwrap_or(1),
+                            y, m, p.day, p.category.as_deref(),
+                            p.route_code.as_deref(), p.page.unwrap_or(1),
                         ).await {
                             Ok(r)  => { data.set(Some(ArchiveData::Articles(r))); loading.set(false); }
                             Err(e) => { error.set(Some(e.message)); loading.set(false); }
                         }
                     }
                     _ => {
-                        match kiosk::get_archive_index(p.year, p.category.as_deref()).await {
+                        match kiosk::get_archive_index(
+                            p.year, p.category.as_deref(), p.route_code.as_deref(),
+                        ).await {
                             Ok(r)  => { data.set(Some(ArchiveData::Index(r))); loading.set(false); }
                             Err(e) => { error.set(Some(e.message)); loading.set(false); }
                         }
@@ -105,27 +113,58 @@ pub fn kiosk_archive() -> Html {
 
     // ── Navigation callbacks ───────────────────────────────────────────────
 
-    // Navigate to month view (preserves category filter).
+    // Navigate to month view (preserves category + route_code filters).
     let make_month_cb = |year: i32, month: i32| {
         let nav = navigator.clone();
         let cat = params.category.clone();
+        let rc  = params.route_code.clone();
         Callback::from(move |_: MouseEvent| {
             nav.push_with_query(&Route::KioskArchive, &ArchiveQuery {
-                year: Some(year), month: Some(month),
-                category: cat.clone(), page: None,
+                year: Some(year), month: Some(month), day: None,
+                category: cat.clone(), route_code: rc.clone(), page: None,
             }).ok();
         })
     };
 
-    // Switch category filter (preserves year/month selection).
+    // Switch category filter (preserves year/month/route_code).
     let make_category_cb = |cat: Option<String>| {
         let nav   = navigator.clone();
         let year  = params.year;
         let month = params.month;
+        let rc    = params.route_code.clone();
         Callback::from(move |_: MouseEvent| {
             nav.push_with_query(&Route::KioskArchive, &ArchiveQuery {
-                year, month, category: cat.clone(), page: None,
+                year, month, day: None, category: cat.clone(),
+                route_code: rc.clone(), page: None,
             }).ok();
+        })
+    };
+
+    // Switch route code filter.
+    let make_route_cb = {
+        let nav    = navigator.clone();
+        let params = params.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: web_sys::HtmlInputElement = e.target_unchecked_into();
+            let val = el.value();
+            let mut q = params.clone();
+            q.route_code = if val.is_empty() { None } else { Some(val) };
+            q.page = None;
+            nav.push_with_query(&Route::KioskArchive, &q).ok();
+        })
+    };
+
+    // Switch day filter.
+    let make_day_cb = {
+        let nav    = navigator.clone();
+        let params = params.clone();
+        Callback::from(move |e: InputEvent| {
+            let el: web_sys::HtmlInputElement = e.target_unchecked_into();
+            let val = el.value();
+            let mut q = params.clone();
+            q.day = if val.is_empty() { None } else { val.parse().ok() };
+            q.page = None;
+            nav.push_with_query(&Route::KioskArchive, &q).ok();
         })
     };
 
@@ -201,7 +240,45 @@ pub fn kiosk_archive() -> Html {
 
                 <div class="flex gap-8">
                     // ── Sidebar ───────────────────────────────────────────
-                    <aside class="w-52 shrink-0 hidden lg:block">
+                    <aside class="w-52 shrink-0 hidden lg:block space-y-4">
+                        // Route filter
+                        <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                            <h3 class="text-xs font-semibold text-slate-500 uppercase
+                                       tracking-wider mb-3">
+                                {"Route"}
+                            </h3>
+                            <input
+                                type="text"
+                                placeholder="e.g. EW-001"
+                                value={params.route_code.clone().unwrap_or_default()}
+                                oninput={make_route_cb}
+                                class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm \
+                                       focus:border-indigo-500 focus:outline-none focus:ring-2 \
+                                       focus:ring-indigo-200"
+                            />
+                        </div>
+
+                        // Day filter (visible in month mode)
+                        if params.year.is_some() && params.month.is_some() {
+                            <div class="bg-white rounded-2xl border border-slate-200 p-4">
+                                <h3 class="text-xs font-semibold text-slate-500 uppercase
+                                           tracking-wider mb-3">
+                                    {"Day"}
+                                </h3>
+                                <input
+                                    type="number"
+                                    min="1" max="31"
+                                    placeholder="1–31"
+                                    value={params.day.map(|d| d.to_string()).unwrap_or_default()}
+                                    oninput={make_day_cb}
+                                    class="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm \
+                                           focus:border-indigo-500 focus:outline-none focus:ring-2 \
+                                           focus:ring-indigo-200"
+                                />
+                            </div>
+                        }
+
+                        // Category filter
                         <div class="bg-white rounded-2xl border border-slate-200 p-4">
                             <h3 class="text-xs font-semibold text-slate-500 uppercase
                                        tracking-wider mb-3">

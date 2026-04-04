@@ -53,6 +53,22 @@ async fn main() -> Result<()> {
     let cfg = AppConfig::from_env().context("Failed to load configuration")?;
     info!(host = %cfg.server.host, port = cfg.server.port, "Starting RailOps backend");
 
+    // ── Security posture check ─────────────────────────────────────────────────
+    const DEFAULT_SECRET:   &str = "change_this_to_a_random_64_char_string_before_going_live_!!1";
+    const DEFAULT_SEED_PW:  &str = "AdminRailOps2024!";
+    if cfg.security.session_secret == DEFAULT_SECRET {
+        tracing::warn!(
+            "SESSION_SECRET is set to the well-known default value. \
+             Set a unique random secret before deploying to production."
+        );
+    }
+    if cfg.security.admin_seed_password == DEFAULT_SEED_PW {
+        tracing::warn!(
+            "ADMIN_SEED_PASSWORD is set to the well-known default value. \
+             Change the admin password immediately after first login in production."
+        );
+    }
+
     ensure_tls_certs(&cfg.tls).context("TLS setup failed")?;
     let tls_config = build_tls_config(&cfg.tls).context("Failed to build TLS config")?;
 
@@ -171,15 +187,24 @@ async fn main() -> Result<()> {
     let rate_limiter = web::Data::new(RateLimiter::new(cfg.security.rate_limit_rpm));
     let trigger_data = web::Data::new(trigger_handle);
 
-    // ── Rate-limiter eviction (prevents unbounded memory growth) ──────────────
+    // ── Rate-limiter eviction + rule refresh ────────────────────────────────────
     {
         let limiter_bg = rate_limiter.clone();
+        let pool_rl    = pool_data.get_ref().clone();
         tokio::spawn(async move {
             let mut evict_tick = tokio::time::interval(Duration::from_secs(120));
             evict_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 evict_tick.tick().await;
                 limiter_bg.evict_expired();
+
+                // Reload rate_limit_rpm from business rules so admin changes take effect.
+                let rpm_str = crate::domain::rules::repo::BusinessRuleRepo::new(&pool_rl)
+                    .get_value("rate_limit_rpm", &shared::rules::RATE_LIMIT_RPM.to_string())
+                    .await;
+                if let Ok(rpm) = rpm_str.parse::<u32>() {
+                    limiter_bg.set_max_rpm(rpm);
+                }
             }
         });
         info!("Rate-limiter eviction task started");

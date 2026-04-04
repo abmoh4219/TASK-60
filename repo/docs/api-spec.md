@@ -12,7 +12,7 @@ X-RailOps-Sig: HMAC-SHA256(token, "METHOD\nPATH_WITH_QUERY\nTIMESTAMP")
 
 `PATH_WITH_QUERY` includes the query string when present, e.g.
 `/api/v1/ops/orders?page=1&per_page=20`.  
-Timestamps outside ±300 s of server time are rejected with `401`.
+Timestamps outside ±120 s of server time are rejected with `401`.
 
 ---
 
@@ -20,9 +20,9 @@ Timestamps outside ±300 s of server time are rejected with `401`.
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/api/v1/auth/login` | — | Obtain session token |
-| POST | `/api/v1/auth/logout` | Bearer | Revoke session |
-| GET  | `/api/v1/auth/me`    | Bearer | Current user info |
+| POST   | `/api/v1/auth/login` | — | Obtain session token |
+| DELETE | `/api/v1/auth/logout` | Bearer | Revoke session |
+| GET    | `/api/v1/auth/me`    | Bearer | Current user info |
 
 ### POST /api/v1/auth/login
 
@@ -61,7 +61,7 @@ Timestamps outside ±300 s of server time are rejected with `401`.
 | `departure_from` | ISO-8601 datetime | Only articles linked to routes with departures ≥ this time |
 | `departure_to` | ISO-8601 datetime | Only articles linked to routes with departures ≤ this time |
 | `page` | int | 1-based page (default 1) |
-| `per_page` | int | Items per page (default 20, max 100) |
+| `per_page` | int | Items per page (default 20, max 50) |
 
 **Response 200**
 ```json
@@ -117,13 +117,13 @@ Roles: Admin, OpsAgent, Dispatcher (read); Admin, OpsAgent (write).
 
 ## Ops — Orders & Passengers
 
-Roles: Admin, OpsAgent, Dispatcher (read); Admin, OpsAgent (write).
+Roles: Admin, OpsAgent, Dispatcher, CsAgent (read); Admin, OpsAgent, CsAgent (write — CsAgent can manage orders, process refunds, and apply fee overrides with mandatory reason).
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET    | `/api/v1/ops/passengers` | Search passengers (pg_trgm) |
 | POST   | `/api/v1/ops/passengers` | Create passenger |
-| DELETE | `/api/v1/ops/passengers/{id}/pii` | Purge PII (Admin only) |
+| POST   | `/api/v1/ops/passengers/{id}/pii-purge` | Request PII purge (Admin only) |
 | GET    | `/api/v1/ops/orders` | List orders (filtered) |
 | GET    | `/api/v1/ops/orders/by-number/{number}` | Find by order number |
 | GET    | `/api/v1/ops/orders/{id}` | Order detail + events |
@@ -133,8 +133,20 @@ Roles: Admin, OpsAgent, Dispatcher (read); Admin, OpsAgent (write).
 | POST   | `/api/v1/ops/orders/{id}/hold` | Place order on hold |
 | POST   | `/api/v1/ops/orders/{id}/refund` | Process refund |
 | POST   | `/api/v1/ops/orders/{id}/fee-override` | Apply fee override |
-| POST   | `/api/v1/ops/orders/{id}/flag-disruption` | Flag service disruption |
+| POST   | `/api/v1/ops/orders/{id}/disruption` | Flag service disruption |
+| POST   | `/api/v1/ops/orders/{id}/rebook` | Rebook onto new schedule |
 | GET    | `/api/v1/ops/orders/{id}/events` | Order event timeline |
+
+`GET /api/v1/ops/orders` query params:
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `passenger_id` | UUID | Filter by exact passenger ID |
+| `schedule_id` | UUID | Filter by schedule |
+| `status` | string | Filter by status |
+| `passenger_name` | string | Free-text passenger name search (ILIKE) |
+| `passenger_phone` | string | Partial phone last-4 search |
+| `page` / `per_page` | int | Pagination |
 
 ---
 
@@ -148,16 +160,20 @@ Roles: Admin only.
 | GET   | `/api/v1/rules/{key}` | Get single rule |
 | PATCH | `/api/v1/rules/{key}` | Update rule value |
 
-Rule keys and defaults:
+Rule keys and defaults (field name is `rule_key`):
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `refund.full_minus_fee_hours` | float | 24 | Hours before departure for full-minus-fee refund |
-| `refund.partial_hours` | float | 2 | Hours before departure for partial (50%) refund |
-| `refund.service_fee_pct` | float | 0.10 | Fee percentage for full-minus-fee tier |
-| `hold.ttl_minutes` | integer | 30 | Minutes before a held order expires |
-| `crawl.quality_threshold` | float | 60.0 | Minimum quality score for publication |
-| `crawl.quarantine_similarity` | float | 0.92 | pg_trgm similarity threshold for quarantine |
+| `refund_full_hours` | float | 24 | Hours before departure for full-minus-fee refund |
+| `refund_partial_hours` | float | 2 | Hours before departure for partial (50%) refund |
+| `refund_processing_fee_usd` | float | 5.00 | Flat processing fee for full-minus-fee tier |
+| `order_hold_ttl_minutes` | integer | 15 | Minutes before a held order expires |
+| `quality_publish_threshold` | float | 85 | Minimum quality score for publication |
+| `similarity_quarantine` | float | 0.92 | pg_trgm similarity threshold for quarantine |
+| `max_failed_logins` | integer | 5 | Failed logins before account lockout |
+| `lockout_minutes` | integer | 15 | Account lockout duration in minutes |
+| `rate_limit_rpm` | integer | 60 | Requests per minute per session token |
+| `session_idle_minutes` | integer | 30 | Idle timeout before session expires |
 
 ---
 
@@ -177,11 +193,11 @@ Roles: Admin, Dispatcher (write); Admin, Dispatcher, OpsAgent (read).
 | GET    | `/api/v1/staffing/shifts/{id}` | Shift detail |
 | PATCH  | `/api/v1/staffing/shifts/{id}/status` | Update shift status |
 | GET    | `/api/v1/staffing/shifts/{id}/candidates` | Run match engine |
-| POST   | `/api/v1/staffing/shifts/{id}/assignments` | Propose assignment |
+| POST   | `/api/v1/staffing/shifts/{id}/propose` | Propose assignment |
 | PATCH  | `/api/v1/staffing/assignments/{id}/respond` | Accept / reject assignment |
 | GET    | `/api/v1/staffing/subscriptions` | List subscriptions |
 | POST   | `/api/v1/staffing/subscriptions` | Subscribe to shift |
-| DELETE | `/api/v1/staffing/subscriptions/{id}` | Unsubscribe |
+| DELETE | `/api/v1/staffing/subscriptions` | Unsubscribe (body: `{ "shift_id": "<uuid>" }`) |
 
 ### Match scoring
 
@@ -201,20 +217,18 @@ Roles: Admin, Dispatcher, OpsAgent (view); Admin, Dispatcher (approve/e-sign).
 |--------|------|-------------|
 | GET    | `/api/v1/credentials` | List credentials |
 | POST   | `/api/v1/credentials` | Upload credential (multipart) |
+| POST   | `/api/v1/credentials/expire` | Run expiry sweep |
 | GET    | `/api/v1/credentials/{id}` | Credential detail (logs "viewed") |
 | GET    | `/api/v1/credentials/{id}/download` | Download decrypted file (with watermark) |
 | PATCH  | `/api/v1/credentials/{id}/review` | Approve / reject |
 | GET    | `/api/v1/credentials/{id}/audit` | Credential audit log |
-| POST   | `/api/v1/credentials/expire` | Run expiry sweep |
-| GET    | `/api/v1/esignatures` | List e-signatures |
-| POST   | `/api/v1/esignatures` | Create e-signature |
-| POST   | `/api/v1/esignatures/{id}/sign` | Sign a document |
+| POST   | `/api/v1/credentials/{id}/esign` | Attach e-signature to credential |
 
 Upload accepts `multipart/form-data` with fields:
 - `contractor_id` (UUID)
-- `doc_type` (string)
-- `expires_at` (ISO-8601, optional)
-- `file` (binary; PDF/JPEG/PNG validated by MIME type AND magic bytes)
+- `document_type` (string)
+- `expires_at` (YYYY-MM-DD, optional)
+- `file` (binary; PDF/JPEG/PNG validated by MIME type AND magic bytes; max 10 MB)
 
 The download endpoint:
 - Decrypts AES-256-GCM stored ciphertext
@@ -222,24 +236,57 @@ The download endpoint:
 - Sets `X-Watermark` response header for all file types
 - Records a `"downloaded"` entry in the credential audit log
 
+## E-Signatures
+
+Roles: Admin, Dispatcher (write); Admin, Dispatcher, OpsAgent (read).
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST   | `/api/v1/esignatures` | Create e-signature for any entity |
+| GET    | `/api/v1/esignatures/{entity_type}/{entity_id}` | List e-signatures for an entity |
+
+`entity_type` must be one of: `credential`, `order`, `assignment`.
+
+**POST body:**
+```json
+{
+  "entity_type": "credential",
+  "entity_id":   "<uuid>",
+  "signer_name": "Jane Smith",
+  "signed_date": "2026-01-15",
+  "signature_data": "<optional SVG string>"
+}
+```
+
 ---
 
 ## Crawl Engine
 
-Roles: Admin only.
+Roles: Admin, OpsAgent.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET    | `/api/v1/crawl/sources` | List crawl sources |
+| GET    | `/api/v1/crawl/sources` | List active crawl sources |
 | POST   | `/api/v1/crawl/sources` | Create source |
 | GET    | `/api/v1/crawl/sources/{id}` | Source detail |
-| PATCH  | `/api/v1/crawl/sources/{id}` | Update source |
-| POST   | `/api/v1/crawl/sources/{id}/trigger` | Trigger immediate crawl |
-| GET    | `/api/v1/crawl/tasks` | List crawl tasks |
-| GET    | `/api/v1/crawl/tasks/{id}` | Task detail |
-| GET    | `/api/v1/crawl/runs` | List crawl runs |
+| GET    | `/api/v1/crawl/sources/{id}/tasks` | List tasks for a source |
+| POST   | `/api/v1/crawl/sources/{id}/tasks` | Create task for a source |
+| POST   | `/api/v1/crawl/tasks/{id}/run` | Trigger immediate run |
+| GET    | `/api/v1/crawl/tasks/{id}/runs` | List runs for a task |
 | GET    | `/api/v1/crawl/runs/{id}` | Run detail |
-| GET    | `/api/v1/crawl/quality-logs` | Quality log entries |
+| GET    | `/api/v1/crawl/runs/{id}/quality` | Quality logs for a run |
+| GET    | `/api/v1/crawl/quality/quarantined` | All quarantined items |
+
+**Task pagination_rules** (optional JSON object):
+```json
+{ "max_pages": 10, "max_items": 500 }
+```
+These controls are enforced during execution: `max_pages` stops the page loop after N pages; `max_items` stops after N items are ingested. Source `city` and `keywords` are applied as content filters before ingest.
+
+**Source types:**
+- `local_package` — reads JSON files from `base_path` (content articles)
+- `internal_mirror` — reads JSON files from `base_path/mirror/` (content articles)
+- `schedule_feed` — reads JSON files from `base_path` containing schedule/inventory data; dispatches to the schedule aggregation pipeline which upserts into `schedules` and `inventory_snapshots` tables with validation and audit logging
 
 ---
 

@@ -74,6 +74,8 @@ pub struct CreateContent {
     pub publish_date:       Option<NaiveDate>,
     pub source_url:         Option<String>,
     pub source_fingerprint: Option<String>,
+    /// SHA-256 hash of the source URL only — first-class URL dedup signal.
+    pub url_fingerprint:    Option<String>,
     pub quality_score:      Option<Decimal>,
     pub tags:               Vec<String>,
 }

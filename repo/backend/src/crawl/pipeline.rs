@@ -20,14 +20,17 @@ use sha2::{Digest, Sha256};
 /// Raw, uncleaned record as read from a source JSON file.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RawItem {
-    pub title:        Option<String>,
-    pub body:         Option<String>,
-    pub category:     Option<String>,
-    pub tags:         Option<Vec<String>>,
-    pub publish_date: Option<String>,
-    pub source_url:   Option<String>,
-    pub author:       Option<String>,
-    pub image_url:    Option<String>,
+    pub title:          Option<String>,
+    pub body:           Option<String>,
+    pub category:       Option<String>,
+    pub tags:           Option<Vec<String>>,
+    pub publish_date:   Option<String>,
+    pub source_url:     Option<String>,
+    pub author:         Option<String>,
+    pub image_url:      Option<String>,
+    /// Optional departure date for route/schedule-linked articles (YYYY-MM-DD).
+    /// Used to detect "departure in the past" anomalies during quality scoring.
+    pub departure_date: Option<String>,
 }
 
 // ── Output ────────────────────────────────────────────────────────────────────
@@ -45,7 +48,10 @@ pub struct TransformedItem {
     pub author:               Option<String>,
     pub image_url:            Option<String>,
     pub fingerprint:          String,
+    pub url_fingerprint:      Option<String>,
     pub transformation_steps: Vec<String>,
+    /// Parsed departure date from source data — used for anomaly detection.
+    pub departure_date:       Option<NaiveDate>,
 }
 
 // ── Transform ─────────────────────────────────────────────────────────────────
@@ -85,6 +91,12 @@ pub fn transform(raw: &RawItem) -> Option<TransformedItem> {
             .ok()
     });
 
+    let departure_date = raw.departure_date.as_deref().and_then(|s| {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d")
+            .or_else(|_| NaiveDate::parse_from_str(s, "%d/%m/%Y"))
+            .ok()
+    });
+
     let slug_source = if !title.is_empty() {
         title.as_str()
     } else {
@@ -96,6 +108,9 @@ pub fn transform(raw: &RawItem) -> Option<TransformedItem> {
     let fingerprint = content_fingerprint(&title, &body, raw.source_url.as_deref());
     steps.push("fingerprint".to_owned());
 
+    // Dedicated URL-only fingerprint for source-URL-based deduplication.
+    let url_fingerprint = raw.source_url.as_deref().map(url_fingerprint);
+
     Some(TransformedItem {
         title,
         slug,
@@ -103,11 +118,13 @@ pub fn transform(raw: &RawItem) -> Option<TransformedItem> {
         category,
         tags,
         publish_date,
-        source_url: raw.source_url.clone(),
-        author:     raw.author.clone(),
-        image_url:  raw.image_url.clone(),
+        source_url:           raw.source_url.clone(),
+        author:               raw.author.clone(),
+        image_url:            raw.image_url.clone(),
         fingerprint,
+        url_fingerprint,
         transformation_steps: steps,
+        departure_date,
     })
 }
 
@@ -201,6 +218,27 @@ pub fn content_fingerprint(title: &str, body: &str, source_url: Option<&str>) ->
     h.update(body.as_bytes());
     h.update(b"\x00");
     if let Some(url) = source_url { h.update(url.as_bytes()); }
+    hex::encode(h.finalize())
+}
+
+/// SHA-256 fingerprint of the source URL alone (normalized: trimmed + lowercase scheme+host).
+///
+/// This is used as a first-class URL-based dedup signal: two articles from the
+/// same canonical URL are treated as duplicates regardless of title/body changes.
+pub fn url_fingerprint(source_url: &str) -> String {
+    // Minimal normalization: trim whitespace, lowercase the scheme and host portion.
+    let normalized = source_url.trim();
+    let normalized = if let Some(rest) = normalized.strip_prefix("HTTPS://")
+        .or_else(|| normalized.strip_prefix("HTTP://"))
+    {
+        // Reconstruct with lower-cased scheme.
+        let scheme = if normalized.to_ascii_lowercase().starts_with("https") { "https" } else { "http" };
+        format!("{scheme}://{rest}")
+    } else {
+        normalized.to_owned()
+    };
+    let mut h = Sha256::new();
+    h.update(normalized.as_bytes());
     hex::encode(h.finalize())
 }
 
@@ -298,6 +336,7 @@ mod tests {
         let raw = RawItem {
             title: None, body: None, category: None, tags: None,
             publish_date: None, source_url: None, author: None, image_url: None,
+            departure_date: None,
         };
         assert!(transform(&raw).is_none());
         println!("[pipeline] transform_rejects_empty_item: PASS");
@@ -310,6 +349,7 @@ mod tests {
             title: Some("Test".into()), body: Some("Body content here for test.".into()),
             category: Some("unknown_type".into()), tags: None,
             publish_date: None, source_url: None, author: None, image_url: None,
+            departure_date: None,
         };
         let item = transform(&raw).unwrap();
         assert_eq!(item.category, "general");
@@ -327,6 +367,7 @@ mod tests {
             publish_date: Some("2024-01-15".into()),
             source_url: Some("https://example.com".into()),
             author: None, image_url: None,
+            departure_date: None,
         };
         let item = transform(&raw).unwrap();
         assert_eq!(item.category, "fares");
